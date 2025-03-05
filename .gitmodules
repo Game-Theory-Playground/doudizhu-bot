@@ -1,0 +1,3 @@
+[submodule "rlcard-showdown"]
+	path = rlcard-showdown
+	url = https://github.com/datamllab/rlcard-showdown.git

@@ -3,15 +3,25 @@
 Bot for playing Doudizhu
 
 ## Prerequisites
-* To run this repo, you need Python3.6+
+To run this repo, you need...
+* Python3.6+ 
+* Pip
+* [Node](https://nodejs.org/) (comes with npm which you also need)
+
+
 ## Setup
-1. Create a python virtual environment in this directory:
+1. Clone the required submodules
+    ```bash
+    git submodule update --init --recursive
+    ```
+
+2. Create a python virtual environment in this directory:
 
     ```bash
     python3 -m venv venv
     ```
 
-2. Activate your python virtual environment
+3. Activate your python virtual environment
 
     ```bash
     # Linux/Mac:
@@ -31,6 +41,12 @@ Bot for playing Doudizhu
     pip install -r requirements.txt
     ```
 
+4. Install npm requirements (just ignore the warnings):
+    ```bash
+    cd rlcard-showdown
+    npm install
+    cd ..
+    ```
 
 ## Running
 
