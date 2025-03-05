@@ -2,17 +2,22 @@
 
 Bot for playing Doudizhu
 
-
+## Prerequisites
+* To run this repo, you need Python3.6+
 ## Setup
-1. Start a python virtual environment in this directory:
+1. Create a python virtual environment in this directory:
+
+    ```bash
+    python3 -m venv venv
+    ```
+
+2. Activate your python virtual environment
 
     ```bash
     # Linux/Mac:
-    python3 -m venv venv
     source venv/bin/activate  
     
     # Windows:
-    python3 -m venv venv
     .\venv\Scripts\Activate.ps1
     ```
 
@@ -29,7 +34,14 @@ Bot for playing Doudizhu
 
 ## Running
 
-Note: if your venv has become deactivated, you may need to reactivate it with the activate command in the Setup section.
+Note: If your venv has become deactivated, you may need to reactivate it (Setup, step 2)
 
-TODO
+* TO run this program, run the following:
+    ```bash
+    python3 main.py
+    ```
 
+
+## Resources
+https://rlcard.org/
+https://github.com/datamllab/rlcard-showdown/
