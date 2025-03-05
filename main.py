@@ -1,15 +1,40 @@
+"""
+An example of playing randomly in RLCard.
+
+Adapted from: https://github.com/datamllab/rlcard/blob/master/examples/run_random.py
+"""
+import argparse
+import pprint
+
 import rlcard
 from rlcard.agents import RandomAgent
+from rlcard.utils import set_seed
 
-env = rlcard.make('blackjack')
-env.set_agents([RandomAgent(num_actions=env.num_actions)])
+def run():
+    # Make environment
+    env = rlcard.make(
+        'doudizhu',
+        config={
+            'seed': 42,
+        }
+    )
 
-print("Actions: ", env.num_actions)
-print("Players: ", env.num_players)
-print("State Shape: ", env.state_shape)
-print("Action Shape: ", env.action_shape)
+    # Seed numpy, torch, random
+    set_seed(42)
 
-trajectories, payoffs = env.run()
+    # Set agents
+    agent = RandomAgent(num_actions=env.num_actions)
+    env.set_agents([agent for _ in range(env.num_players)])
 
-print("Trajectories: ", trajectories)
-print("Payoffs: ", payoffs)
+    # Generate data from the environment
+    trajectories, player_wins = env.run(is_training=False)
+    # Print out the trajectories
+    print('\nTrajectories:')
+    print(trajectories)
+    print('\nSample raw observation:')
+    pprint.pprint(trajectories[0][0]['raw_obs'])
+    print('\nSample raw legal_actions:')
+    pprint.pprint(trajectories[0][0]['raw_legal_actions'])
+
+if __name__ == '__main__':
+    run()
