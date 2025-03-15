@@ -1,16 +1,17 @@
 # Doudizhu Bot
 
-Bot for playing Doudizhu
-
-## Prerequisites
-To run this repo, you need...
-* Python3.6+ 
-* Pip
-* [Node](https://nodejs.org/) (comes with npm which you also need)
+Bot for playing Doudizhu!
 
 
-## Setup
-1. Clone the required submodules
+## Setup Without Docker (not recommended)
+
+1. To run this repo, you need...
+    * Git
+    * Python3.6+ 
+    * Pip
+    * [Node V10](https://nodejs.org/en/download) (comes with npm which you also need). NOTE: This outdated version is required!
+
+2. Clone the required submodules
     ```bash
     git submodule update --init --recursive
     ```
@@ -47,6 +48,30 @@ To run this repo, you need...
     npm install
     cd ..
     ```
+
+## Setup WITH containers
+
+
+1. To run this repo, you need...
+    * Git
+    * Docker Engine for Linux of Docker Desktop for Mac/Windows.
+
+2. Clone the required submodules
+    ```bash
+    git submodule update --init --recursive
+    ```
+
+2. Start container
+    a. Build the container image and start the container. 
+        ```bash
+        sudo docker build -t bot .
+        ```
+    
+    b. Make sure you are in this root directory. These commands mount on the current directory as the containers file system so any changes you make to the files on your host machine will be mirrored in the container.
+    
+        ```
+        sudo docker run --rm -v $(pwd):/workspace --net=host bot
+        ```
 
 ## Running
 
