@@ -78,8 +78,6 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 
 ## Running
 
-Note: If your venv has become deactivated, you may need to reactivate it (Setup, step 2)
-
 * To run this program, run the following:
     ```bash
     python3 main.py
@@ -96,6 +94,13 @@ Note: If your venv has become deactivated, you may need to reactivate it (Setup,
     cd rlcard-showdown
     npm start
     ```
+
+    Run this in another terminal:
+    ```bash
+    cd rlcard-showdown/pve_server
+    python3 run_dmc.py
+    ```
+
 
     You can view leaderboard at http://127.0.0.1:3000/ and PvE demo of Dou Dizhu at http://127.0.0.1:3000/pve/doudizhu-demo.
 

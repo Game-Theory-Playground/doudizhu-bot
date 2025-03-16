@@ -5,7 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y  \
     curl wget bash python3-pip 
-RUN apt-get clean
+RUN apt-get update && apt-get install -y  git
 
 # Install Node.js 10
 ENV NVM_DIR=/root/.nvm
