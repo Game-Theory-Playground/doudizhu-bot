@@ -91,12 +91,22 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 
 ## Running
 
-* To run this program, run the following:
+* To train a bot, run:
     ```bash
-    python3 main.py
+    python3 dmc_trainer.py --num_actor_devices 1 --num_actors 5 --save_interval 1
     ```
 
-* You can view the GUI at http://127.0.0.1:3000/.
+* To evaluate your trained model with 2 rule-based strategies, run:
+    ```bash
+    python3 evaluator.py --models results/doudizhu/0_0.pth doudizhu-rule-v1 doudizhu-rule-v1 --cuda '' --num_games 100
+
+    ```
+* To run a game where the bot play randomly, run:
+    ```bash
+    python3 random_play.py
+    ```
+
+* To test the trained model against other bots in the GUI, open http://127.0.0.1:3000/, upload a zip of your model in /results, and Launch a tournament. [NOTE: a script for making this zip is coming soon.]
 
 ## Docker Tips
 * To open another docker terminal for a running container, run the following on your home-machine:
@@ -106,5 +116,5 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 
 
 ## Resources
-https://rlcard.org/
-https://github.com/datamllab/rlcard-showdown/
+* https://rlcard.org/
+* https://github.com/datamllab/rlcard-showdown/
