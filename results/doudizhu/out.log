@@ -1,3 +1,0 @@
-Saving logs data to results/doudizhu/logs.csv
-Saving logs' fields to results/doudizhu/fields.csv
-Updated log fields: ['_tick', '_time', 'frames', 'mean_episode_return_0', 'loss_0', 'mean_episode_return_1', 'loss_1', 'mean_episode_return_2', 'loss_2']
