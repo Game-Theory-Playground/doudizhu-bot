@@ -15,26 +15,19 @@ Bot for playing Doudizhu!
     git submodule update --init --recursive
     ```
 
-2. Build the container image and start the container.  The container is mounted on the current directory as the containers file system so any changes you make to the files on your host machine will be mirrored in the container.
+3. Build the container image and start the container.  The container is mounted on the current directory as the containers file system so any changes you make to the files on your host machine will be mirrored in the container.
     
-    In one terminal, start the container for the GUI server
+    In one terminal, start the container for the GUI server:
     ```bash
     docker compose build
     docker compose up
-
     ```
 
     In another terminal, run:
     ```bash
     docker compose exec shell bash
     ```
-    You can run all future commands in this second container
-    
-    b. Make sure you are in this root directory. These commands mount on the current directory as the containers file system so any changes you make to the files on your host machine will be mirrored in the container.
-
-    ```
-    sudo docker run --rm -it -v $(pwd):/workspace --net=host bot
-    ```
+    You can run all future commands in this second container.
 
 
 ## OR Setup Without Docker (not recommended)
@@ -72,18 +65,18 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
     set-executionpolicy remotesigned
     ```
 
-3. Next, install all the python requirements:
+4. Next, install all the python requirements:
     ```bash
     pip install -r requirements.txt
     ```
 
-4. Install npm requirements (just ignore the warnings):
+5. Install npm requirements (just ignore the warnings):
     ```bash
     cd rlcard-showdown
     npm install
     cd ..
     ```
-5. Start the server for the GUI
+6. Start the server for the GUI
     ```bash
     cd rlcard-showdown/server
     python3 manage.py runserver
@@ -108,19 +101,10 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 ## Docker Tips
 * To open another docker terminal for a running container, run the following on your home-machine:
     ```bash
-    # Show your running CONTAINER_ID
-    docker ps 
-
-    # Open another terminal using that CONTAINER_ID
-    docker exec -it  <YOUR_CONTAINER_ID> bash
+    docker compose exec shell bash
     ```
 
 
 ## Resources
 https://rlcard.org/
 https://github.com/datamllab/rlcard-showdown/
-
-
-docker compose up
-docker compose exec shell bash
-
