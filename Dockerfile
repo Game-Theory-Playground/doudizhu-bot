@@ -19,15 +19,22 @@ WORKDIR /workspace
 
 COPY . .
 
-# Install node requirements
-WORKDIR /workspace/rlcard-showdown
-RUN bash -c 'source $NVM_DIR/nvm.sh && npm install'
-WORKDIR /workspace
-
 # Install python requirements
 RUN pip3 install --break-system-packages -r requirements.txt
+
+
+# Install node requirements and migrate django
+WORKDIR /workspace/rlcard-showdown
+RUN bash -c 'source $NVM_DIR/nvm.sh && npm install'
+
+# Migrate django
+WORKDIR /workspace/rlcard-showdown/server
+RUN python3 manage.py migrate
+
+WORKDIR /workspace
+
 
 # Ports for GUI
 EXPOSE 3000 4000
 
-CMD ["bash"]
+CMD ["/bin/bash", "-c", "source $NVM_DIR/nvm.sh && exec bash"]

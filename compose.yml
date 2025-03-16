@@ -1,0 +1,35 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace/rlcard-showdown/server
+    command: ["python3", "manage.py", "runserver", "0.0.0.0:8000"]
+    volumes:
+      - .:/workspace
+    ports:
+      - "8000:8000"
+    depends_on:
+      - frontend
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace/rlcard-showdown
+    command: ["/bin/bash", "-c", "source /root/.nvm/nvm.sh && npm start"]
+    volumes:
+      - .:/workspace
+    ports:
+      - "3000:3000"
+
+  shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    command: ["bash"]
+    volumes:
+      - .:/workspace
+    stdin_open: true
+    tty: true
