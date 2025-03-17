@@ -99,7 +99,6 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 * To evaluate your trained model with 2 rule-based strategies, run the following **after replacing 0_0.pth with the high
     ```bash
     python3 evaluator.py --models results/doudizhu/0_0.pth doudizhu-rule-v1 doudizhu-rule-v1 --cuda '' --num_games 100
-
     ```
 
 * To test the trained model against other bots in the GUI, open http://127.0.0.1:3000/, upload a zip of your model in /results, and Launch a tournament. [NOTE: a script for making this zip is coming soon.]
