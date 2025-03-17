@@ -100,8 +100,11 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
     ```bash
     python3 evaluator.py --models results/doudizhu/0_0.pth doudizhu-rule-v1 doudizhu-rule-v1 --cuda '' --num_games 100
     ```
-
-* To test the trained model against other bots in the GUI, open http://127.0.0.1:3000/, upload a zip of your model in /results, and Launch a tournament. [NOTE: a script for making this zip is coming soon.]
+* To create a dodizhu.zip of your model that is formatted for the GUI, run:
+    ```bash
+    python3 zip_model.py
+    ```
+* To test the trained model against other bots in the GUI, open http://127.0.0.1:3000/, upload the zip of your model in /results, and Launch a tournament.
 
 ## Docker Tips
 * To open another docker terminal for a running container, run the following on your home-machine:
