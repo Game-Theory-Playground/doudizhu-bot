@@ -1,6 +1,8 @@
 from .base_bot import BaseBot
+
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 class RARSMSBot(BaseBot):
     def __init__(self, position=None):
@@ -74,6 +76,29 @@ class RARSMSBot(BaseBot):
         # ... (detailed implementation)
     
         return features
+
+class ResidualBlock(nn.Module):
+    """Basic ResNet-18 block"""
+    def __init__(self, in_channels, out_channels, stride=1):
+        super(ResidualBlock, self).__init__()
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm1d(out_channels)
+        
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm1d(out_channels)
+            )
+            
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += self.shortcut(x)
+        out = F.relu(out)
+        return out
     
 class ActorNetwork(nn.Module):
     def __init__(self):
@@ -84,7 +109,7 @@ class ActorNetwork(nn.Module):
             nn.ReLU()
         )
         
-        # ResNet-18 backbone (simplified version)
+        # ResNet-18 backbone
         self.resnet = self._create_resnet_backbone()
         
         # FC layers
@@ -92,9 +117,11 @@ class ActorNetwork(nn.Module):
         self.fc2 = nn.Linear(309, 1)  # Output action probabilities
         self.softmax = nn.Softmax(dim=1)
         
-    def forward(self, imperfect, history, perfect):
-        # Concatenate features
-        x = torch.cat([imperfect, history, perfect], dim=0)
+    def forward(self, imperfect, history, perfect=None):
+        if perfect is not None:
+            x = torch.cat([imperfect, history, perfect], dim=0)
+        else:
+            x = torch.cat([imperfect, history], dim=0)
         
         # Forward pass
         x = self.cnn(x.unsqueeze(0))
@@ -104,16 +131,105 @@ class ActorNetwork(nn.Module):
         return self.softmax(x)
         
     def _create_resnet_backbone(self):
-        # Simplified ResNet implementation
-        # ...
-        pass
+        """Create a ResNet-18 backbone"""
+        layers = []
+        
+        # Layer 1
+        in_channels = 64
+        out_channels = 64
+        for _ in range(2):
+            layers.append(ResidualBlock(in_channels, out_channels))
+            in_channels = out_channels
+            
+        # Layer 2
+        out_channels = 128
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Layer 3
+        out_channels = 256
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Layer 4
+        out_channels = 512
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Global average pooling and final layer
+        backbone = nn.Sequential(
+            *layers,
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten()
+        )
+        
+        return backbone
 
 class CriticNetwork(nn.Module):
     def __init__(self):
         super().__init__()
-        # Similar architecture but outputs state value
-        # ...
-        pass
+        # CNN layer processing concatenated features [57 x 54]
+        self.cnn = nn.Sequential(
+            nn.Conv1d(57, 64, kernel_size=3, padding=1),
+            nn.ReLU()
+        )
+        
+        # ResNet-18 backbone
+        self.resnet = self._create_resnet_backbone()
+        
+        # FC layers - direct to 1×1 output as shown in diagram
+        self.fc1 = nn.Linear(512, 128)
+        self.fc2 = nn.Linear(128, 1)  # Output state value V(s_t)
+        
+    def forward(self, state_features):
+        # Process state features directly
+        # Input shape should be [batch_size, 57, 54]
+        x = self.cnn(state_features)
+        x = self.resnet(x)
+        x = F.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x  # V(s_t)
+        
+    def _create_resnet_backbone(self):
+        """Create a ResNet-18 backbone"""
+        layers = []
+        
+        # Layer 1
+        in_channels = 64
+        out_channels = 64
+        for _ in range(2):
+            layers.append(ResidualBlock(in_channels, out_channels))
+            in_channels = out_channels
+            
+        # Layer 2
+        out_channels = 128
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Layer 3
+        out_channels = 256
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Layer 4
+        out_channels = 512
+        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
+        in_channels = out_channels
+        layers.append(ResidualBlock(in_channels, out_channels))
+        
+        # Global average pooling and final layer
+        backbone = nn.Sequential(
+            *layers,
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten()
+        )
+        
+        return backbone
         
 class DMCModule(nn.Module):
     def __init__(self):
