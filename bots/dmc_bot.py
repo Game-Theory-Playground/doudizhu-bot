@@ -1,4 +1,3 @@
-# bots/dmc_bot.py
 import torch
 from .base_bot import BaseBot
 

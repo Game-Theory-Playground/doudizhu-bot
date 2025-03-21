@@ -1,10 +1,9 @@
-# bots/base_bot.py
 class BaseBot:
     """Base interface for all Doudizhu bots"""
     
     def __init__(self, position=None):
         self.position = position
-        self.device = 'cpu'
+        self.device = 'gpu'
         self.use_raw = False 
     
     def act(self, state):
