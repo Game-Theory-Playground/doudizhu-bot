@@ -3,7 +3,7 @@ import argparse
 
 import rlcard
 from rlcard.utils import get_device, set_seed, tournament
-from bots import DMCBot
+from bots import DMCBot, RARSMSBot
 
 def evaluate(args):
 
@@ -30,6 +30,11 @@ def evaluate(args):
         elif bot_type == 'random':
             from rlcard.agents import RandomAgent
             agent = RandomAgent(num_actions=env.num_actions)
+        elif bot_type == 'rarsms':
+            if len(parts) < 2:
+                raise ValueError("rarsms bot needs a model path")
+            model_path = parts[1]
+            agent = RARSMSBot(model_path, position)
         else:
             raise ValueError(f"Unknown bot type: {bot_type}")
             
