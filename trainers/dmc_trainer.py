@@ -1,4 +1,4 @@
-import os
+import time
 from rlcard.agents.dmc_agent import DMCTrainer
 from .base_trainer import BaseTrainer
 
@@ -11,14 +11,18 @@ class DMCBotTrainer(BaseTrainer):
         self.num_actor_devices = num_actor_devices
         self.num_actors = num_actors
         self.training_device = training_device
-    
+
     def train(self):
-        os.environ["CUDA_VISIBLE_DEVICES"] = self.cuda
-        xpid = 'doudizhu'
-        
-        # Initialize the DMC trainer
+        xpid = f'{int(time.time())}' 
+
+        print(f"[INFO] Starting DMC training")
+        print(f"[INFO] CUDA_VISIBLE_DEVICES: {self.cuda}")
+        print(f"[INFO] XPID: {xpid}")
+        print(f"[INFO] Saving models to: {self.savedir}")
+        print(f"[INFO] Training device: cuda:{self.training_device}")
+
         trainer = DMCTrainer(
-            self.env,
+            env=self.env,
             cuda=self.cuda,
             xpid=xpid,
             savedir=self.savedir,
@@ -27,6 +31,5 @@ class DMCBotTrainer(BaseTrainer):
             num_actors=self.num_actors,
             training_device=self.training_device,
         )
-        
-        # Train DMC Agents
+
         trainer.start()
