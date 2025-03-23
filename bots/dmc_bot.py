@@ -41,14 +41,6 @@ class DMCBot(BaseBot):
             action = output
             info = {}
 
-        legal_actions = state['legal_actions']
-    
-        # Add diagnostic info
-        print(f"[DMCBot INFO] Pos {self.position} - Chosen: {action}")
-        print(f"[DEBUG] Legal: {list(legal_actions.keys())}")
-        if 'values' in info:
-            print(f"[DEBUG] Values: {info['values']}")
-
         return int(action), info
 
     def set_device(self, device):

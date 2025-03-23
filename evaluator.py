@@ -8,7 +8,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
 
 import rlcard
 from rlcard.utils import get_device, set_seed, tournament
-from bots import DMCBot
+from bots import DMCBot, RARSMSBot
 
 def evaluate(args):
     device = get_device()
@@ -58,9 +58,9 @@ def evaluate(args):
 
 if __name__ == '__main__':
     parser.add_argument('--bots', nargs='*', default=[
-        'dmc:results/dmc/1742603200/0_2860800.pth',
-        'dmc:results/dmc/1742603200/1_2860800.pth',
-        'dmc:results/dmc/1742603200/2_2860800.pth'
+        'dmc:results/dmc/1742603200/0_14947200.pth',
+        'random',
+        'random'
     ])
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--num_games', type=int, default=1000)
