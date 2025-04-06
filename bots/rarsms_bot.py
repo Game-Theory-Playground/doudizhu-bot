@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from collections import Counter
 
+# Card ordering for Dou Dizhu (Fighting the Landlord)
 CARD_ORDER = ['3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A', '2', 'BJ', 'RJ']
 SPECIFIC_MAP = {card: idx for idx, card in enumerate(CARD_ORDER)}
 
@@ -31,40 +32,26 @@ class ResidualBlock(nn.Module):
         out = F.relu(out)
         return out
     
-class ActorNetwork(nn.Module):
-    """Actor network that outputs action probabilities"""
-    def __init__(self):
-        super().__init__()
-        # CNN layer processing concatenated features [49 x 54]
-        self.cnn = nn.Sequential(
-            nn.Conv1d(49, 64, kernel_size=3, padding=1),
+class ResNetBackbone(nn.Module):
+    """Shared ResNet-18 backbone implementation for both Actor and Critic networks"""
+    def __init__(self, in_channels=64):
+        super(ResNetBackbone, self).__init__()
+        
+        # Initial convolution layer
+        self.initial_conv = nn.Sequential(
+            nn.Conv1d(in_channels, 64, kernel_size=3, padding=1),
             nn.ReLU()
         )
         
-        # ResNet-18 backbone
-        self.resnet = self._create_resnet_backbone()
+        # Create ResNet backbone
+        self.layers = self._create_layers()
         
-        # FC layers
-        self.fc1 = nn.Linear(512, 309)
-        self.fc2 = nn.Linear(309, 1)
-        self.softmax = nn.Softmax(dim=1)
+    def forward(self, x):
+        x = self.initial_conv(x)
+        x = self.layers(x)
+        return x
         
-    def forward(self, imperfect, history, perfect=None):
-        """Process state features and output action probabilities"""
-        # Concatenate available features
-        if perfect is not None:
-            x = torch.cat([imperfect, history, perfect], dim=0)
-        else:
-            x = torch.cat([imperfect, history], dim=0)
-        
-        # Forward pass
-        x = self.cnn(x.unsqueeze(0))
-        x = self.resnet(x)
-        x = self.fc1(x)
-        x = self.fc2(x)
-        return self.softmax(x)
-        
-    def _create_resnet_backbone(self):
+    def _create_layers(self):
         """Create a ResNet-18 backbone"""
         layers = []
         
@@ -102,18 +89,39 @@ class ActorNetwork(nn.Module):
         
         return backbone
 
+class ActorNetwork(nn.Module):
+    """Actor network that outputs action probabilities"""
+    def __init__(self):
+        super().__init__()
+        # Backbone network processing input features
+        self.backbone = ResNetBackbone(in_channels=49)
+        
+        # FC layers
+        self.fc1 = nn.Linear(512, 309)
+        self.fc2 = nn.Linear(309, 1)
+        self.softmax = nn.Softmax(dim=1)
+        
+    def forward(self, imperfect, history, perfect=None):
+        """Process state features and output action probabilities"""
+        # Concatenate available features
+        if perfect is not None:
+            x = torch.cat([imperfect, history, perfect], dim=0)
+        else:
+            x = torch.cat([imperfect, history], dim=0)
+        
+        # Forward pass
+        x = x.unsqueeze(0)  # Add batch dimension
+        x = self.backbone(x)
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return self.softmax(x)
+
 class CriticNetwork(nn.Module):
     """Critic network that estimates state values"""
     def __init__(self):
         super().__init__()
-        # CNN layer processing concatenated features [57 x 54]
-        self.cnn = nn.Sequential(
-            nn.Conv1d(57, 64, kernel_size=3, padding=1),
-            nn.ReLU()
-        )
-        
-        # ResNet-18 backbone
-        self.resnet = self._create_resnet_backbone()
+        # Backbone network processing input features
+        self.backbone = ResNetBackbone(in_channels=57)
         
         # FC layers for value output
         self.fc1 = nn.Linear(512, 128)
@@ -121,56 +129,19 @@ class CriticNetwork(nn.Module):
         
     def forward(self, state_features):
         """Process state features and output state value"""
-        x = self.cnn(state_features)
-        x = self.resnet(x)
+        x = self.backbone(state_features)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x  # V(s_t)
-        
-    def _create_resnet_backbone(self):
-        """Create a ResNet-18 backbone (same as actor)"""
-        layers = []
-        
-        # Layer 1
-        in_channels = 64
-        out_channels = 64
-        for _ in range(2):
-            layers.append(ResidualBlock(in_channels, out_channels))
-            in_channels = out_channels
-            
-        # Layer 2
-        out_channels = 128
-        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
-        in_channels = out_channels
-        layers.append(ResidualBlock(in_channels, out_channels))
-        
-        # Layer 3
-        out_channels = 256
-        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
-        in_channels = out_channels
-        layers.append(ResidualBlock(in_channels, out_channels))
-        
-        # Layer 4
-        out_channels = 512
-        layers.append(ResidualBlock(in_channels, out_channels, stride=2))
-        in_channels = out_channels
-        layers.append(ResidualBlock(in_channels, out_channels))
-        
-        # Global average pooling and flatten
-        backbone = nn.Sequential(
-            *layers,
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten()
-        )
-        
-        return backbone
 
 class RARSMSBot(BaseBot):
-    """Reinforcement Learning bot for card games using Actor-Critic architecture."""
+    """Reinforcement Learning bot for Dou Dizhu using Actor-Critic architecture."""
     
     def __init__(self, position=None, device=None):
         super().__init__(position)
-        self.use_raw = False
+
+        # Recoding features from raw information from RLCard environment
+        self.use_raw = True
         
         # Set device - use CUDA if available by default
         self.device = device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu')
@@ -260,7 +231,7 @@ class RARSMSBot(BaseBot):
         # Most recent action and cards played
         feat[17:19] = self._encode_last_action(trace, num_cards_left)
 
-        # Last 15 actions history
+        # Last 15 actions history (30 rows)
         feat[19:49] = self._extract_history_features(state)
         
         return feat
@@ -275,7 +246,7 @@ class RARSMSBot(BaseBot):
             if len(action) == 4 and len(set(action)) == 1:
                 bombs_played += 1
             # Rocket (joker pair)
-            elif action in ['BJ', 'RJ'] or sorted(action) == ['B', 'R']:
+            elif sorted(action) == ['BJ', 'RJ']:
                 bombs_played += 1
         return bombs_played
 
@@ -393,9 +364,9 @@ class RARSMSBot(BaseBot):
                 vec[SPECIFIC_MAP[card]] = 1
         return vec
 
-    def _encode_cards_in_hand(self, cards: list[str]):
+    def _encode_cards_in_hand(self, cards):
         """
-        Encode a hand of cards into a 3x54 feature tensor following the scheme in the image.
+        Encode a hand of cards into a 3x54 feature tensor.
         
         This encoding includes:
         - Row 0: Card count encoding (4 bits per card)
@@ -437,7 +408,7 @@ class RARSMSBot(BaseBot):
                 feat[0, idx] = 1       # Count encoding
                 feat[1, solo_idx] = 1   # Solo pattern encoding
         
-        # 2: chain
+        # 2: chain detection
 
         # Count cards by rank for chain detection
         rank_counts = [card_counter.get(card, 0) for card in CARD_ORDER[:-2]]
