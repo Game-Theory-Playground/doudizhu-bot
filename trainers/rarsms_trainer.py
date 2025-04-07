@@ -12,6 +12,7 @@ class RARSMSBotTrainer(BaseTrainer):
         self.num_episodes = num_episodes
         self.cuda = cuda
         self.training_device = training_device
+        self.gamma = 0.001 # TODO: pass this as hyperparameter
         
     def train(self):
         # Set CUDA device
@@ -26,6 +27,7 @@ class RARSMSBotTrainer(BaseTrainer):
         # Create optimizers
         actor_optimizer = optim.Adam(bot.actor_network.parameters(), lr=self.learning_rate)
         critic_optimizer = optim.Adam(bot.critic_network.parameters(), lr=self.learning_rate)
+        
         
         # Training loop
         for episode in range(self.num_episodes):
@@ -44,7 +46,10 @@ class RARSMSBotTrainer(BaseTrainer):
                 # Give rewards
                 # Environment reward only given at end of game (usually 0)
                 environment_reward = self.env.get_payoffs()[player_id] if self.env.is_over() else 0
-                intrinsic_reward = 
+                intrinsic_reward = self._calculate_intrinsic_reward()
+                reward = environment_reward + intrinsic_reward  # TODO: Figure out if need both
+
+                temporal_distance_error = reward + self.gamma * self.bot.predict_state(state) + self.bot.predict_state(next_state)
 
 
                 
@@ -55,6 +60,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 # ...
                 
                 state = next_state
+                player_id = next_player_id
                 
             # Save model periodically
             if episode % 100 == 0:
@@ -62,3 +68,16 @@ class RARSMSBotTrainer(BaseTrainer):
                 
             # Log progress
             # ...
+
+
+        def _calculate_intrinsic_reward(self):
+            """
+            Some of this may need to be moved to rarsms.
+            This will also need more params
+            This will need to:
+            - Calculate minimum splits for each player
+            - Some more stuff
+            """
+
+            return 0
+
