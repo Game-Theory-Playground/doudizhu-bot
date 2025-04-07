@@ -127,9 +127,9 @@ class CriticNetwork(nn.Module):
         self.fc1 = nn.Linear(512, 128)
         self.fc2 = nn.Linear(128, 1)  # Output state value V(s_t)
         
-    def forward(self, state_features):
+    def forward(self, perfect):
         """Process state features and output state value"""
-        x = self.backbone(state_features)
+        x = self.backbone(perfect)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x  # V(s_t)
@@ -184,6 +184,18 @@ class RARSMSBot(BaseBot):
         # Choose action with highest probability
         action_id = torch.argmax(masked_probs).item()
         return action_id
+    
+    def predict_state(self, state):
+        """Use the Critic Network to predict the state of the system."""
+
+        # Extract features
+        perfect_features = self._extract_perfect_features(state)
+
+        # Forward pass through actor network (without perfect features during play)
+        with torch.no_grad():
+            state = self.critic_network(perfect_features)
+            
+        return state
     
     def _extract_imperfect_features(self, state):
         """
