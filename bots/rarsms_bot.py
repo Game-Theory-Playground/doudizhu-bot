@@ -162,6 +162,45 @@ class RARSMSBot(BaseBot):
         
     def act(self, state):
         """Select an action based on current state."""
+        
+        masked_probs = self._get_action_probs(state)
+        
+        # Choose action with highest probability
+        action_id = torch.argmax(masked_probs).item()
+        
+        # Add small value to avoid log(0)
+        log_prog = torch.log(masked_probs[action_id] + 1e-8).item()
+
+        return action_id, log_prog
+    
+    def get_log_prob(self, state, action):
+        """
+        Give a state and action, return the log probabilities
+        of the action being played.
+        """
+        masked_probs = self._get_action_probs(state)
+        
+        # Add small value to avoid log(0)
+        log_prog = torch.log(masked_probs[action] + 1e-8).item()
+
+        return log_prog
+    
+    def predict_state(self, state):
+        """Use the Critic Network to predict the state of the system."""
+
+        # Extract features
+        perfect_features = self._extract_perfect_features(state)
+
+        # Forward pass through actor network (without perfect features during play)
+        with torch.no_grad():
+            state = self.critic_network(perfect_features)
+            
+        return state
+    
+
+    def _get_action_probs(self, state):
+        """ Get the valid action probabilities of the current state """
+
         # Extract features
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
@@ -180,23 +219,10 @@ class RARSMSBot(BaseBot):
         else:
             # If all actions are masked, use uniform distribution
             masked_probs = legal_actions / legal_actions.sum()
-            
-        # Choose action with highest probability
-        action_id = torch.argmax(masked_probs).item()
-        return action_id
-    
-    def predict_state(self, state):
-        """Use the Critic Network to predict the state of the system."""
 
-        # Extract features
-        perfect_features = self._extract_perfect_features(state)
+        return masked_probs
 
-        # Forward pass through actor network (without perfect features during play)
-        with torch.no_grad():
-            state = self.critic_network(perfect_features)
-            
-        return state
-    
+
     def _extract_imperfect_features(self, state):
         """
         Extract imperfect information features (49x54).

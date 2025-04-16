@@ -16,6 +16,7 @@ class RARSMSBotTrainer(BaseTrainer):
         # Hyperparameters
         self.gamma = 0.001
         self.lmda = 0.001 
+        self.epsilon = 0.1 
 
     def train(self):
         # Set CUDA device
@@ -31,7 +32,13 @@ class RARSMSBotTrainer(BaseTrainer):
         actor_optimizer = optim.Adam(bot.actor_network.parameters(), lr=self.learning_rate)
         critic_optimizer = optim.Adam(bot.critic_network.parameters(), lr=self.learning_rate)
         
-        
+        old_states = []
+        old_actions = []
+        old_probs = []
+
+        curr_states = []
+        curr_actions = []
+        curr_probs = []
         # Each Game (Episode)
         for episode in range(self.num_episodes):
             # Reset environment
@@ -42,21 +49,25 @@ class RARSMSBotTrainer(BaseTrainer):
             # Each round (frame)
             while not self.env.is_over():
                 # Choose action
-                action = bot.act(state)
+                action, prob = bot.act(state)
+                
+                curr_states.append(state)
+                curr_actions.append(action)
+                curr_probs.append(prob)
                 
                 next_state, _ = self.env.step(action)
                 
                 reward = self._calculate_intrinsic_reward()
         
-                temporal_difference_error = reward + self.gamma * self.bot.predict_state(state) - self.bot.predict_state(next_state)
+                temporal_difference_error = reward + self.gamma * bot.predict_state(state) - bot.predict_state(next_state)
                 temporal_difference_errors.append(temporal_difference_error)
                 state = next_state
             
 
             advantage_function = self._calculate_advantage(temporal_difference_errors)
 
-            actor_loss = self._calculate_critic_loss(self, advantage_function)
-            critic_loss = self._calculate_critic_loss(self)
+            actor_loss = self._calculate_actor_loss(bot, advantage_function, old_states, old_actions, old_probs)
+            critic_loss = self._calculate_critic_loss()
 
             actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -65,15 +76,20 @@ class RARSMSBotTrainer(BaseTrainer):
             critic_optimizer.zero_grad()
             critic_loss.backward()
             critic_optimizer.step()
+
+            old_states = curr_states
+            old_actions = curr_actions
+            old_probs = curr_probs
+            curr_states = []
+            curr_actions = []
+            curr_probs = []
             
                 
             # Save model periodically
             if episode % 100 == 0:
                 self._save_model(bot, episode)
                 
-            # Log progress
-            # ...
-
+    
 
         def _calculate_intrinsic_reward(self):
             """
@@ -99,13 +115,32 @@ class RARSMSBotTrainer(BaseTrainer):
             return advantage_function         
                  
 
-        def _calculate_actor_loss(self, advantage_function):
+        def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
             """ 
-                PPO Clipped Objective Function:
-                This will also need more params
+            PPO Clipped Objective Function.
+            TODO may need logprob instead of just prob
             """
+            
+            old_states = torch.tensor(old_states, dtype=torch.float32)
+            old_actions = torch.tensor(old_actions, dtype=torch.long)
+            old_probs = torch.tensor(old_probs, dtype=torch.float32)
+            advantages = torch.tensor(advantage_function, dtype=torch.float32)
 
-            # TODO
+            probs = []
+
+            for state, action in zip(old_states, old_actions):
+                prob = bot.get_log_prob(state, action)
+                probs.append(prob)
+            probs = torch.tensor(probs, dtype=torch.float32)
+
+            ratios = torch.exp(probs - old_probs)
+            clipped_ratios = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon)
+
+            actor_loss = -torch.mean(torch.min(ratios * advantages, clipped_ratios * advantages))
+
+            return actor_loss
+
+
         def _calculate_critic_loss(self):
             """ 
                 Objective function. Not sure what loss function this is.
