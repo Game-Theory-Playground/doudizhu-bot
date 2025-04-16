@@ -186,16 +186,19 @@ class RARSMSBot(BaseBot):
         return log_prog
     
     def predict_state(self, state):
-        """Use the Critic Network to predict the state of the system."""
+        """
+        Use the Critic Network to predict the expected reward using the
+        current state
+        """
 
         # Extract features
         perfect_features = self._extract_perfect_features(state)
 
         # Forward pass through actor network (without perfect features during play)
         with torch.no_grad():
-            state = self.critic_network(perfect_features)
+            expected_reward = self.critic_network(perfect_features)
             
-        return state
+        return expected_reward
     
 
     def _get_action_probs(self, state):

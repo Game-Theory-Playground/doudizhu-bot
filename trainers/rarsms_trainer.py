@@ -36,11 +36,13 @@ class RARSMSBotTrainer(BaseTrainer):
         old_actions = []
         old_probs = []
 
-        curr_states = []
-        curr_actions = []
-        curr_probs = []
         # Each Game (Episode)
         for episode in range(self.num_episodes):
+            curr_states = []
+            curr_actions = []
+            curr_probs = []
+            curr_rewards = []
+        
             # Reset environment
             state, player_id = self.env.reset()
 
@@ -58,6 +60,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 next_state, _ = self.env.step(action)
                 
                 reward = self._calculate_intrinsic_reward()
+                curr_rewards.append(reward)
         
                 temporal_difference_error = reward + self.gamma * bot.predict_state(state) - bot.predict_state(next_state)
                 temporal_difference_errors.append(temporal_difference_error)
@@ -67,7 +70,7 @@ class RARSMSBotTrainer(BaseTrainer):
             advantage_function = self._calculate_advantage(temporal_difference_errors)
 
             actor_loss = self._calculate_actor_loss(bot, advantage_function, old_states, old_actions, old_probs)
-            critic_loss = self._calculate_critic_loss()
+            critic_loss = self._calculate_critic_loss(bot, curr_states, curr_rewards)
 
             actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -80,9 +83,7 @@ class RARSMSBotTrainer(BaseTrainer):
             old_states = curr_states
             old_actions = curr_actions
             old_probs = curr_probs
-            curr_states = []
-            curr_actions = []
-            curr_probs = []
+
             
                 
             # Save model periodically
@@ -141,12 +142,23 @@ class RARSMSBotTrainer(BaseTrainer):
             return actor_loss
 
 
-        def _calculate_critic_loss(self):
+        def _calculate_critic_loss(self, bot, states, rewards):
             """ 
-                Objective function. Not sure what loss function this is.
-                This will also need more params
+                Objective function using MSE.
             """
 
+            states = torch.tensor(states, dtype=torch.float32)
+            rewards = torch.tensor(rewards, dtype=torch.float32)
+
+            predicted_rewards = []
+            for state in states:
+                predicted_rewards.append(bot.critic_network(state))
+            predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
+
+
+            loss = torch.mean((predicted_rewards - rewards) ** 2)
+
+            return loss
 
 
 
