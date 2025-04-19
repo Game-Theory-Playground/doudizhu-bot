@@ -137,7 +137,7 @@ class CriticNetwork(nn.Module):
 class RARSMSBot(BaseBot):
     """Reinforcement Learning bot for Dou Dizhu using Actor-Critic architecture."""
     
-    def __init__(self, position=None, device=None):
+    def __init__(self, douzerox_path, position=None, device=None):
         super().__init__(position)
 
         # Recoding features from raw information from RLCard environment
@@ -149,11 +149,26 @@ class RARSMSBot(BaseBot):
         # Initialize networks
         self.actor_network = ActorNetwork()
         self.critic_network = CriticNetwork()
+        self.dmc_agent = self._load_dmc_agent(douzerox_path)
         
         # Move networks to the selected device
         self.actor_network.to(self.device)
         self.critic_network.to(self.device)
+    
+    def _load_dmc_agent(self, model_path):
+        """Load DMC agent from model path"""
+        from rlcard.agents.dmc_agent.model import DMCAgent
+        from torch.serialization import add_safe_globals
+        add_safe_globals([DMCAgent])
         
+        dmc_agent = torch.load(model_path, map_location=self.device, weights_only=False)
+        if hasattr(dmc_agent, 'to'):
+            dmc_agent.to(self.device)
+        if hasattr(dmc_agent, 'eval'):
+            dmc_agent.eval()
+        
+        return dmc_agent
+    
     def set_device(self, device):
         """Set the computation device (CPU/GPU)."""
         self.device = device
@@ -180,11 +195,21 @@ class RARSMSBot(BaseBot):
         else:
             # If all actions are masked, use uniform distribution
             masked_probs = legal_actions / legal_actions.sum()
-            
+        
         # Choose action with highest probability
-        action_id = torch.argmax(masked_probs).item()
-        return action_id
+        actor_action_id = torch.argmax(masked_probs).item()
+
+        # For action IDs 0-188, use directly from Actor network
+        if actor_action_id <= 188:
+            return actor_action_id
+        
+        # Get DouZero's choice (using it native step method)
+        douzero_action = self.dmc_agent.step(state)
+
+        
+        return actor_action_id
     
+
     def _extract_imperfect_features(self, state):
         """
         Extract imperfect information features (49x54).
