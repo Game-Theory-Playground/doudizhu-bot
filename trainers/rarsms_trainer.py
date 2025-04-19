@@ -5,11 +5,11 @@ import torch.optim as optim
 import sys
 
 class RARSMSBotTrainer(BaseTrainer):
-    def __init__(self, env, savedir, learning_rate=0.001, batch_size=32,
-                 num_episodes=10000, cuda='', training_device='0'):
+    def __init__(self, env, savedir, cuda, save_interval,  num_actor_devices,num_actors, training_device, 
+                 learning_rate=0.001, batch_size=32, num_episodes=10000):
         super().__init__(env, savedir)
         self.learning_rate = learning_rate
-        self.batch_size = batch_size
+        # self.batch_size = batch_size
         self.num_episodes = num_episodes
         self.cuda = cuda
         self.training_device = training_device
@@ -25,15 +25,15 @@ class RARSMSBotTrainer(BaseTrainer):
         self.r_landlord_prev = 0
         self.r_peasants_prev = 0
 
+        self.train()
+
 
     def train(self):
         # Set CUDA device
         device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() else "cpu")
         
-        # Create bot instance
-        
+        # Create bot instance 
         bot = RARSMSBot()
-        bot.build_networks()
         bot.set_device(device)
         
         # Create optimizers
@@ -83,6 +83,8 @@ class RARSMSBotTrainer(BaseTrainer):
 
             actor_loss = self._calculate_actor_loss(bot, advantage_function, old_states, old_actions, old_probs)
             critic_loss = self._calculate_critic_loss(bot, curr_states, curr_rewards)
+            print("EPISODE {episode}/{self.num_episodes} ACTOR LOSS: {actor_loss}")
+            print("EPISODE {episode}/{self.num_episodes} CRITIC LOSS: {critic_loss}")
 
             actor_optimizer.zero_grad()
             actor_loss.backward()
@@ -295,8 +297,5 @@ class RARSMSBotTrainer(BaseTrainer):
         loss = torch.mean((predicted_rewards - rewards) ** 2)
 
         return loss
-
-
-
 
 

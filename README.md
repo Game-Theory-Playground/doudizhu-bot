@@ -37,10 +37,9 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
     ```
 
 4. Below are your options:
-* To train a bot, run:
+* To train dmc bot bot, run:
     ```bash
-    cd trainers
-    python3 dmc_trainer.py --num_actor_devices 1 --num_actors 5 --save_interval 1
+    python3 train.py --algorithm dmc --num_actor_devices 1 --num_actors 5 --save_interval 1
     ```
 
 * To evaluate your trained model with 2 rule-based strategies, run the following **after replacing the .pth file with the path to your model**
@@ -50,6 +49,12 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 * To create a dodizhu.zip of your model that is formatted for the GUI, run:
     ```bash
     python3 zip_model.py
+    ```
+
+* To train a rarsms bot bot, run:
+    ```bash
+    python3 train.py --algorithm rarsms --num_actor_devices 1 --num_actors 5 --save_interval 1
+
     ```
 
 
