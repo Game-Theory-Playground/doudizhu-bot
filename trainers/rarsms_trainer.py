@@ -17,6 +17,13 @@ class RARSMSBotTrainer(BaseTrainer):
         self.gamma = 0.001
         self.lmda = 0.001 
         self.epsilon = 0.1 
+        self.beta = 0.01
+
+        # Other required variables
+        # Prior rewards
+        self.r_landlord_prev = 0
+        self.r_peasants_prev = 0
+
 
     def train(self):
         # Set CUDA device
@@ -42,6 +49,9 @@ class RARSMSBotTrainer(BaseTrainer):
             curr_actions = []
             curr_probs = []
             curr_rewards = []
+            self.r_landlord_prev = 0
+            self.r_peasants_prev = 0
+            
         
             # Reset environment
             state, player_id = self.env.reset()
@@ -57,9 +67,10 @@ class RARSMSBotTrainer(BaseTrainer):
                 curr_actions.append(action)
                 curr_probs.append(prob)
                 
-                next_state, _ = self.env.step(action)
+                next_state, player_id = self.env.step(action)
                 
-                reward = self._calculate_intrinsic_reward()
+                environment_reward = self.env.get_payoffs()[player_id] if self.env.is_over() else 0
+                reward = self._calculate_intrinsic_reward(state, environment_reward, player_id)
                 curr_rewards.append(reward)
         
                 temporal_difference_error = reward + self.gamma * bot.predict_state(state) - bot.predict_state(next_state)
@@ -92,7 +103,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 
     
 
-        def _calculate_intrinsic_reward(self):
+        def _calculate_intrinsic_reward(self, state, environment_reward, player_id):
             """
             Some of this may need to be moved to rarsms.
             This will also need more params
@@ -101,8 +112,30 @@ class RARSMSBotTrainer(BaseTrainer):
             - Some more stuff
             """
 
+            min_split = self._calculate_minimum_splits(state)
+
+            if player_id == 0:  # Landlord
+                k = 1
+            else:  # Peasant
+                k = -1/2
+
+            r_landlord = 0
+            r_peasant_down = 0
+            r_peasant_up = 0
+
+            r_peasants = max(r_peasant_down + self.beta*r_peasant_up, r_peasant_up + self.beta*r_peasant_down)
+            r = torch.clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
+
+            self.r_landlord_prev = r_landlord
+            self.r_peasants_prev = r_peasants
+
+
+
             return 0
         
+
+        def _calculate_minimum_splits(self):
+            return 0
 
         def _calculate_advantage_function(self, temporal_difference_errors):
             T = len(temporal_difference_errors)
@@ -119,7 +152,6 @@ class RARSMSBotTrainer(BaseTrainer):
         def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
             """ 
             PPO Clipped Objective Function.
-            TODO may need logprob instead of just prob
             """
             
             old_states = torch.tensor(old_states, dtype=torch.float32)
@@ -144,7 +176,7 @@ class RARSMSBotTrainer(BaseTrainer):
 
         def _calculate_critic_loss(self, bot, states, rewards):
             """ 
-                Objective function using MSE.
+            Objective function using MSE.
             """
 
             states = torch.tensor(states, dtype=torch.float32)
