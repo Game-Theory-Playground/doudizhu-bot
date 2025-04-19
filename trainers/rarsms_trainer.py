@@ -2,6 +2,7 @@ from .base_trainer import BaseTrainer
 from bots import RARSMSBot
 import torch
 import torch.optim as optim
+import sys
 
 class RARSMSBotTrainer(BaseTrainer):
     def __init__(self, env, savedir, learning_rate=0.001, batch_size=32,
@@ -17,7 +18,7 @@ class RARSMSBotTrainer(BaseTrainer):
         self.gamma = 0.001
         self.lmda = 0.001 
         self.epsilon = 0.1 
-        self.beta = 0.01
+        self.beta = 0.5  # Weights cooperation of peasants (0 no cooperation -> 1 cooperation)
 
         # Other required variables
         # Prior rewards
@@ -103,94 +104,197 @@ class RARSMSBotTrainer(BaseTrainer):
                 
     
 
-        def _calculate_intrinsic_reward(self, state, environment_reward, player_id):
-            """
-            Some of this may need to be moved to rarsms.
-            This will also need more params
-            This will need to:
-            - Calculate minimum splits for each player
-            - Some more stuff
-            """
+    def _calculate_intrinsic_reward(self, state, environment_reward:float, player_id:int, ):
+        """
+        Computes intrinsic reward based on progress in minimizing splits and reducing cards.
+        """
 
-            min_split = self._calculate_minimum_splits(state)
+        if player_id == 0:  # Landlord
+            k = 1
+        else:  # Peasant
+            k = -1/2
 
-            if player_id == 0:  # Landlord
-                k = 1
-            else:  # Peasant
-                k = -1/2
+        L, N = self._calculate_minimum_splits(0, True)
+        Lt, Ct = self._calculate_minimum_splits(0, False)
+        r_landlord = (L -Lt + N - Ct) /  (L + N)
 
-            r_landlord = 0
-            r_peasant_down = 0
-            r_peasant_up = 0
+        L, N = self._calculate_minimum_splits(1, True)
+        Lt, Ct = self._calculate_minimum_splits(1, False)
+        r_peasant_down = (L -Lt + N - Ct) /  (L + N)
 
-            r_peasants = max(r_peasant_down + self.beta*r_peasant_up, r_peasant_up + self.beta*r_peasant_down)
-            r = torch.clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
+        L, N = self._calculate_minimum_splits(2, True)
+        Lt, Ct = self._calculate_minimum_splits(2, False)
+        r_peasant_up = (L -Lt + N - Ct) /  (L + N)
 
-            self.r_landlord_prev = r_landlord
-            self.r_peasants_prev = r_peasants
+        r_peasants = max(r_peasant_down + self.beta*r_peasant_up, r_peasant_up + self.beta*r_peasant_down)
+        r = torch.clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
+
+        self.r_landlord_prev = r_landlord
+        self.r_peasants_prev = r_peasants
 
 
 
-            return 0
+        return r
+    
+
+    def _calculate_minimum_splits(self, player_id: int, initial_hand:bool):
+        """
+        Returns a tuple of the minimum split and the number of cards in the hand for current
+        state. If initial_hand is true, then returns the minimum split, and the number of 
+        cards in the hand for the players first hand at the beginning of the game.
+        """
+
+        RANK_ORDER = '3456789TJQKA2BR'  # 15 ranks
+        RANK_INDEX = {rank: i for i, rank in enumerate(RANK_ORDER)}
+
+        state = self.env.get_state(player_id)
+        if initial_hand:
+            hand = state['initial_hand']
+        else:
+            hand = state['current_hand']
+
+        # Convert current_hand string to X vector (counts per rank)
+        X = [0] * 15
+        for card in hand:
+            X[RANK_INDEX[card]] += 1
+
+        memo = {}
+
+        # Recursive function G
+        def G(X):
+            # Check for memoization (optional for speed)
+            key = tuple(X)
+            if key in memo:
+                return memo[key]
+
+            # Base case: no cards left
+            if sum(X) == 0:
+                return 0
+
+            L = sys.maxsize
+
+            # Try all chains and combos
+            for p in range(12):  # up to 'A'
+                for m in range(1, 4):  # only consider m=1,2,3 for chain
+                    if X[p] < m:
+                        continue
+                    y = p
+                    for f in range(p + 1, 12):
+                        if X[f] >= m:
+                            y = f
+                        else:
+                            break
+                    for w in range(p + 4, y + 1):  # Chain-Solo (>=5)
+                        if m == 1:
+                            new_X = X[:]
+                            valid = True
+                            for i in range(p, w + 1):
+                                if new_X[i] < 1:
+                                    valid = False
+                                    break
+                                new_X[i] -= 1
+                            if valid:
+                                L = min(L, G(new_X) + 1)
+                    for w in range(p + 2, y + 1):  # Chain-Pair (>=3)
+                        if m == 2:
+                            new_X = X[:]
+                            valid = True
+                            for i in range(p, w + 1):
+                                if new_X[i] < 2:
+                                    valid = False
+                                    break
+                                new_X[i] -= 2
+                            if valid:
+                                L = min(L, G(new_X) + 1)
+                    for w in range(p + 1, y + 1):  # Plane (>=2)
+                        if m == 3:
+                            new_X = X[:]
+                            valid = True
+                            for i in range(p, w + 1):
+                                if new_X[i] < 3:
+                                    valid = False
+                                    break
+                                new_X[i] -= 3
+                            if valid:
+                                # Can optionally add solos/pairs for Plane-Solo or Plane-Pair
+                                L = min(L, G(new_X) + 1)
+
+            # Count Bombs, Trios, Pairs, Solos
+            b, k, j, q = 0, 0, 0, 0
+            for count in X:
+                if count == 4:
+                    b += 1
+                elif count == 3:
+                    k += 1
+                elif count == 2:
+                    j += 1
+                elif count == 1:
+                    q += 1
+
+            # Add minimal combination of remaining cards
+            L = min(L, b + k + j + q)
+
+            memo[key] = L
+            return L
+
         
-
-        def _calculate_minimum_splits(self):
-            return 0
-
-        def _calculate_advantage_function(self, temporal_difference_errors):
-            T = len(temporal_difference_errors)
-            advantage_function = []
-            for t in range(T):
-                advtg = 0
-                for i in range(t, T):
-                    advtg += (self.gamma * self.lmda) ** (i-t) * temporal_difference_errors[i]
-                advantage_function.append(advtg)
-
-            return advantage_function         
-                 
-
-        def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
-            """ 
-            PPO Clipped Objective Function.
-            """
-            
-            old_states = torch.tensor(old_states, dtype=torch.float32)
-            old_actions = torch.tensor(old_actions, dtype=torch.long)
-            old_probs = torch.tensor(old_probs, dtype=torch.float32)
-            advantages = torch.tensor(advantage_function, dtype=torch.float32)
-
-            probs = []
-
-            for state, action in zip(old_states, old_actions):
-                prob = bot.get_log_prob(state, action)
-                probs.append(prob)
-            probs = torch.tensor(probs, dtype=torch.float32)
-
-            ratios = torch.exp(probs - old_probs)
-            clipped_ratios = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon)
-
-            actor_loss = -torch.mean(torch.min(ratios * advantages, clipped_ratios * advantages))
-
-            return actor_loss
+        return G(X), len(hand)
 
 
-        def _calculate_critic_loss(self, bot, states, rewards):
-            """ 
-            Objective function using MSE.
-            """
+    def _calculate_advantage_function(self, temporal_difference_errors):
+        T = len(temporal_difference_errors)
+        advantage_function = []
+        for t in range(T):
+            advtg = 0
+            for i in range(t, T):
+                advtg += (self.gamma * self.lmda) ** (i-t) * temporal_difference_errors[i]
+            advantage_function.append(advtg)
 
-            states = torch.tensor(states, dtype=torch.float32)
-            rewards = torch.tensor(rewards, dtype=torch.float32)
+        return advantage_function         
+                
 
-            predicted_rewards = []
-            for state in states:
-                predicted_rewards.append(bot.critic_network(state))
-            predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
+    def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
+        """ 
+        PPO Clipped Objective Function.
+        """
+        
+        old_states = torch.tensor(old_states, dtype=torch.float32)
+        old_actions = torch.tensor(old_actions, dtype=torch.long)
+        old_probs = torch.tensor(old_probs, dtype=torch.float32)
+        advantages = torch.tensor(advantage_function, dtype=torch.float32)
+
+        probs = []
+
+        for state, action in zip(old_states, old_actions):
+            prob = bot.get_log_prob(state, action)
+            probs.append(prob)
+        probs = torch.tensor(probs, dtype=torch.float32)
+
+        ratios = torch.exp(probs - old_probs)
+        clipped_ratios = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon)
+
+        actor_loss = -torch.mean(torch.min(ratios * advantages, clipped_ratios * advantages))
+
+        return actor_loss
 
 
-            loss = torch.mean((predicted_rewards - rewards) ** 2)
+    def _calculate_critic_loss(self, bot, states, rewards):
+        """ 
+        Objective function using MSE.
+        """
 
-            return loss
+        states = torch.tensor(states, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+
+        predicted_rewards = []
+        for state in states:
+            predicted_rewards.append(bot.critic_network(state))
+        predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
+
+
+        loss = torch.mean((predicted_rewards - rewards) ** 2)
+
+        return loss
 
 
 

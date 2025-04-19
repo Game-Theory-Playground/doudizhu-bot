@@ -198,7 +198,7 @@ class RARSMSBot(BaseBot):
         with torch.no_grad():
             expected_reward = self.critic_network(perfect_features)
             
-        return expected_reward
+        return  
     
 
     def _get_action_probs(self, state):
