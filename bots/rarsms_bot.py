@@ -1,4 +1,6 @@
 from .base_bot import BaseBot
+from rlcard.games.doudizhu.utils.action_encoding import ID_TO_ACTION, ACTION_ID_DICT
+
 
 import torch
 import torch.nn as nn
@@ -127,9 +129,10 @@ class CriticNetwork(nn.Module):
         self.fc1 = nn.Linear(512, 128)
         self.fc2 = nn.Linear(128, 1)  # Output state value V(s_t)
         
-    def forward(self, perfect):
+    def forward(self, imperfect, history, perfect):
         """Process state features and output state value"""
-        x = self.backbone(perfect)
+        x = torch.cat([imperfect, history, perfect], dim=0)
+        x = self.backbone(x)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x  # V(s_t)
@@ -192,13 +195,17 @@ class RARSMSBot(BaseBot):
         """
 
         # Extract features
+        imperfect_features = self._extract_imperfect_features(state)
+        history_features = self._extract_history_features(state)
         perfect_features = self._extract_perfect_features(state)
+        
 
         # Forward pass through actor network (without perfect features during play)
         with torch.no_grad():
-            expected_reward = self.critic_network(perfect_features)
+            expected_reward = self.actor_network(imperfect_features, history_features, perfect_features)
+
             
-        return  
+        return expected_reward
     
 
     def _get_action_probs(self, state):
@@ -228,7 +235,7 @@ class RARSMSBot(BaseBot):
 
     def _extract_imperfect_features(self, state):
         """
-        Extract imperfect information features (49x54).
+        Extract imperfect information features features (19x54).
         
         This includes information that is visible to the agent during gameplay
         without knowing other players' hands.
@@ -242,7 +249,7 @@ class RARSMSBot(BaseBot):
         current_hand = raw['current_hand']
 
         # Initialize feature tensor
-        feat = torch.zeros(49, 54, device=self.device)
+        feat = torch.zeros(19, 54, device=self.device)
         
         # 0. Count bombs from trace
         bombs_played = self._count_bombs_in_trace(trace)
@@ -271,9 +278,6 @@ class RARSMSBot(BaseBot):
 
         # Most recent action and cards played
         feat[17:19] = self._encode_last_action(trace, num_cards_left)
-
-        # Last 15 actions history (30 rows)
-        feat[19:49] = self._extract_history_features(state)
         
         return feat
 
@@ -362,9 +366,9 @@ class RARSMSBot(BaseBot):
 
     def _extract_perfect_features(self, state, perfect_state):
         """
-        Extract a 57x54 perfect feature tensor.
+        Extract a 8x54 perfect feature tensor.
         
-        This includes both imperfect features and perfect information about
+        This is the perfect information about
         other players' hands, which is only available during training.
         """
         num_cards_left = state['raw_obs']['num_cards_left']
@@ -372,10 +376,7 @@ class RARSMSBot(BaseBot):
         prev_pid = (current_pid - 1) % 3
         next_pid = (current_pid + 1) % 3
 
-        # 1. Get the 49x54 imperfect features
-        imperfect_feat = self._extract_imperfect_features(state)
-
-        # 2. Prepare an 8x54 block for perfect features
+        # Prepare an 8x54 block for perfect features
         perfect_feat = torch.zeros(8, 54, device=self.device)
         
         # Previous player's identity and cards
@@ -386,9 +387,7 @@ class RARSMSBot(BaseBot):
         perfect_feat[4] = self._encode_player_identity(next_pid, num_cards_left[next_pid])
         perfect_feat[5:8] = self._encode_cards_in_hand(list(perfect_state['hand_cards'][next_pid]))
 
-        # Concatenate imperfect and perfect features: (49+8)x54 = 57x54
-        final_feats = torch.cat([imperfect_feat, perfect_feat], dim=0)
-        return final_feats
+        return perfect_feat
 
     def _get_legal_actions_mask(self, state):
         """Create a binary mask for legal actions."""
