@@ -4,10 +4,55 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import Counter
+from rlcard.games.doudizhu.utils import ACTION_2_ID
 
 # Card ordering for Dou Dizhu (Fighting the Landlord)
 CARD_ORDER = ['3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A', '2', 'BJ', 'RJ']
 SPECIFIC_MAP = {card: idx for idx, card in enumerate(CARD_ORDER)}
+ABSTRACT_ACTION_NEEDS_RESOLUTION = set(range(41, 54)) | set(range(54, 67)) | set(range(200, 238)) | set(range(238, 268)) | set(range(268, 281)) | set(range(281, 294))
+
+def build_real_action_id_to_abstraction_id() -> list[int]:
+    """
+    Builds a list mapping from real action ID (0–27471) to abstract action ID (0–308),
+    including internal groupings within abstraction types.
+    """
+    mapping = [None] * 27472  # total number of real actions
+
+    current_real_id = 0
+
+    # Format: (start_abstract_id, num_abstracts, num_real_actions)
+    grouped_blocks = [
+        (0, 15, 15),       # Solo
+        (15, 13, 13),      # pair
+        (28, 13, 13),      # Trio
+        (41, 13, 182),     # Trio with single
+        (54, 13, 156),     # Trio with pair
+        (67, 36, 36),      # Chain of solo
+        (103, 52, 52),     # Chain of pair
+        (155, 45, 45),     # Chain of trio
+        (200, 38, 21822),  # Plane with solo
+        (238, 30, 2939),   # Plane with pair
+        (268, 13, 1326),   # Quad with solo
+        (281, 13, 858),    # Quad with pair
+        (294, 13, 13),     # Bomb
+        (307, 1, 1),       # Rocket
+        (308, 1, 1),       # Pass
+    ]
+
+    for abs_start, num_abs, num_real in grouped_blocks:
+        real_per_abs = num_real // num_abs
+        extras = num_real % num_abs  # In case not evenly divisible
+
+        for i in range(num_abs):
+            abstract_id = abs_start + i
+            count = real_per_abs + (1 if i < extras else 0)  # distribute leftovers evenly
+            for _ in range(count):
+                mapping[current_real_id] = abstract_id
+                current_real_id += 1
+
+    return mapping
+REAL_TO_ABS = build_real_action_id_to_abstraction_id()
+
 
 class ResidualBlock(nn.Module):
     """Basic ResNet-18 block with skip connections"""
@@ -149,10 +194,25 @@ class RARSMSBot(BaseBot):
         # Initialize networks
         self.actor_network = ActorNetwork()
         self.critic_network = CriticNetwork()
+        self.dmc_agent = self._load_dmc_agent(douzerox_path)
         
         # Move networks to the selected device
         self.actor_network.to(self.device)
         self.critic_network.to(self.device)
+    
+    def _load_dmc_agent(self, model_path):
+        """Load DMC agent from model path"""
+        from rlcard.agents.dmc_agent.model import DMCAgent
+        from torch.serialization import add_safe_globals
+        add_safe_globals([DMCAgent])
+         
+        dmc_agent = torch.load(model_path, map_location=self.device, weights_only=False)
+        if hasattr(dmc_agent, 'to'):
+            dmc_agent.to(self.device)
+        if hasattr(dmc_agent, 'eval'):
+            dmc_agent.eval()
+        
+        return dmc_agent
     
     def set_device(self, device):
         """Set the computation device (CPU/GPU)."""
@@ -161,31 +221,47 @@ class RARSMSBot(BaseBot):
         self.critic_network.to(device)
         
     def act(self, state):
-        """Select an action based on current state."""
-        # Extract features
+        """Select an action based on current state, with RARSMS + DouZeroX filtering."""
+        # === Step 1: RARSMS forward pass ===
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
-        
-        # Forward pass through actor network (without perfect features during play)
+
         with torch.no_grad():
             action_probs = self.actor_network(imperfect_features, history_features)
-            
-        # Get legal actions mask and apply it
+
         legal_actions = self._get_legal_actions_mask(state)
         masked_probs = action_probs * legal_actions
-        
-        # Renormalize probabilities
-        if masked_probs.sum() > 0:
-            masked_probs = masked_probs / masked_probs.sum()
-        else:
-            # If all actions are masked, use uniform distribution
-            masked_probs = legal_actions / legal_actions.sum()
-        
-        # Choose action with highest probability
-        action_id = torch.argmax(masked_probs).item()
 
-        
-        return action_id
+        if masked_probs.sum() > 0:
+            masked_probs /= masked_probs.sum()
+        else:
+            masked_probs = legal_actions / legal_actions.sum()
+
+        rarsms_action_id = torch.argmax(masked_probs).item()
+
+        # === Step 2: Get DouZeroX candidate actions ===
+        action_idx, metadata = self.dmc_agent.step(state)
+        legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
+
+        # === Step 3: Map DouZeroX concrete actions to abstract IDs and filter ===
+        candidates = []
+        for act_str in legal_action_strs:
+            real_id = ACTION_2_ID.get(act_str)
+            if real_id is None:
+                continue
+            if REAL_TO_ABS[real_id] == rarsms_action_id:
+                candidates.append((act_str, metadata['values'][act_str]))
+
+        # === Step 4: Pick best candidate, or fallback ===
+        if candidates:
+            # Choose the one with highest DMC probability
+            selected_action = max(candidates, key=lambda x: x[1])[0]
+        else:
+            # No match: fallback to most probable action produced by DouZeroX
+            selected_action = action_idx
+
+        return (selected_action, metadata)
+
     
 
     def _extract_imperfect_features(self, state):
