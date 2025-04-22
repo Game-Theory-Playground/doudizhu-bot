@@ -432,7 +432,8 @@ class RARSMSBot(BaseBot):
         """Create a binary mask for legal actions."""
         mask = torch.zeros(309, device=self.device)
         for action_id in state['legal_actions']:
-            mask[action_id] = 1.0
+            abstraction_id = REAL_TO_ABS[action_id]
+            mask[abstraction_id] = 1.0
         return mask
     
     def _cards_to_tensor(self, cards):
