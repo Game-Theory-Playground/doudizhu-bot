@@ -14,44 +14,77 @@ ABSTRACT_ACTION_NEEDS_RESOLUTION = set(range(41, 54)) | set(range(54, 67)) | set
 def build_real_action_id_to_abstraction_id() -> list[int]:
     """
     Builds a list mapping from real action ID (0–27471) to abstract action ID (0–308),
-    including internal groupings within abstraction types.
+    strictly following the abstract ID ordering and applying manual subgroup logic when needed.
     """
-    mapping = [None] * 27472  # total number of real actions
-
+    mapping = [None] * 27472
     current_real_id = 0
 
-    # Format: (start_abstract_id, num_abstracts, num_real_actions)
     grouped_blocks = [
-        (0, 15, 15),       # Solo
-        (15, 13, 13),      # pair
-        (28, 13, 13),      # Trio
-        (41, 13, 182),     # Trio with single
-        (54, 13, 156),     # Trio with pair
-        (67, 36, 36),      # Chain of solo
-        (103, 52, 52),     # Chain of pair
-        (155, 45, 45),     # Chain of trio
-        (200, 38, 21822),  # Plane with solo
-        (238, 30, 2939),   # Plane with pair
-        (268, 13, 1326),   # Quad with solo
-        (281, 13, 858),    # Quad with pair
-        (294, 13, 13),     # Bomb
-        (307, 1, 1),       # Rocket
-        (308, 1, 1),       # Pass
+        (0, 15, 15),       # Solo, evenly
+        (15, 13, 13),      # pair, evenly
+        (28, 13, 13),      # Trio, evenly
+        (41, 13, 182),     # Trio with single, evenly
+        (54, 13, 156),     # Trio with pair, evenly
+        (67, 36, 36),      # Chain of solo, evenly
+        (103, 52, 52),     # Chain of pair, evenly
+        (155, 45, 45),     # Chain of trio, evenly
+        (200, 11, 968),    # Plane with solo 1, evenly
+        (211, 10, 3282),   # Plane with solo 2, custom distribution
+        (221, 9, 7184),    # Plane with solo 3, custom distribution
+        (230, 8, 10388),   # Plane with solo 4, custom distribution
+        (238, 11, 605),    # Plane with pair 1, evenly
+        (249, 10, 1200),   # Plane with pair 2, evenly
+        (259, 9, 1134),    # Plane with pair 3, evenly
+        (268, 13, 1326),   # Quad with solo, evenly
+        (281, 13, 858),    # Quad with pair, evenly
+        (294, 13, 13),     # Bomb, evenly
+        (307, 1, 1),       # Rocket, evenly
+        (308, 1, 1),       # Pass, evenly
     ]
 
     for abs_start, num_abs, num_real in grouped_blocks:
-        real_per_abs = num_real // num_abs
-        extras = num_real % num_abs  # In case not evenly divisible
+        if abs_start == 211 and num_abs == 10 and num_real == 3282:
+            # Plane with solo 2: 10 → [329, 328, ..., 328, 329]
+            for i in range(10):
+                abstract_id = abs_start + i
+                count = 329 if i in (0, 9) else 328
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
 
-        for i in range(num_abs):
-            abstract_id = abs_start + i
-            count = real_per_abs + (1 if i < extras else 0)  # distribute leftovers evenly
-            for _ in range(count):
-                mapping[current_real_id] = abstract_id
-                current_real_id += 1
+        elif abs_start == 221 and num_abs == 9 and num_real == 7184:
+            # Plane with solo 3: 9 → [806, 796, ..., 796, 806]
+            for i in range(9):
+                abstract_id = abs_start + i
+                count = 806 if i in (0, 8) else 796
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+        elif abs_start == 230 and num_abs == 8 and num_real == 10388:
+            # Plane with solo 4: 8 → [1330, 1288, ..., 1288, 1330]
+            for i in range(8):
+                abstract_id = abs_start + i
+                count = 1330 if i in (0, 7) else 1288
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+        else:
+            # Evenly distribute or use +1 for remainder
+            real_per_abs = num_real // num_abs
+            extras = num_real % num_abs
+            for i in range(num_abs):
+                abstract_id = abs_start + i
+                count = real_per_abs + (1 if i < extras else 0)
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
 
     return mapping
+
 REAL_TO_ABS = build_real_action_id_to_abstraction_id()
+print(REAL_TO_ABS)
 
 
 class ResidualBlock(nn.Module):
@@ -519,3 +552,4 @@ class RARSMSBot(BaseBot):
             feat[2, 41:] = 1
         
         return feat
+    
