@@ -327,7 +327,7 @@ class RARSMSBot(BaseBot):
         return log_prog
     
 
-    def predict_state(self, state):
+    def predict_state(self, state, perfect_state):
         """
         Use the Critic Network to predict the expected reward using the
         current state
@@ -336,7 +336,7 @@ class RARSMSBot(BaseBot):
         # Extract features
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
-        perfect_features = self._extract_perfect_features(state)
+        perfect_features = self._extract_perfect_features(state, perfect_state)
         
 
         # Forward pass through actor network (without perfect features during play)

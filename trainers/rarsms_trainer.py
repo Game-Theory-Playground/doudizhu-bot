@@ -27,6 +27,8 @@ class RARSMSBotTrainer(BaseTrainer):
         self.r_landlord_prev = 0
         self.r_peasants_prev = 0
 
+        self.initial_hand = ''
+
         self.train()
 
 
@@ -48,35 +50,38 @@ class RARSMSBotTrainer(BaseTrainer):
 
         # Each Game (Episode)
         for episode in range(self.num_episodes):
+
+            # Reset environment
+            state, player_id = self.env.reset()
+
             curr_states = []
             curr_actions = []
             curr_probs = []
             curr_rewards = []
             self.r_landlord_prev = 0
             self.r_peasants_prev = 0
+            temporal_difference_errors = []
+            self.initial_hand = ''
             
         
-            # Reset environment
-            state, player_id = self.env.reset()
-
-            temporal_difference_errors = []
-
             # Each round (frame)
             while not self.env.is_over():
                 # Choose action
                 action, prob = bot.act(state)
+                perfect_state = self.env.get_perfect_information()
                 
                 curr_states.append(state)
                 curr_actions.append(action)
                 curr_probs.append(prob)
                 
                 next_state, player_id = self.env.step(action)
+                next_perfect_state = self.env.get_perfect_information()
                 
                 environment_reward = self.env.get_payoffs()[player_id] if self.env.is_over() else 0
-                reward = self._calculate_intrinsic_reward(state, environment_reward, player_id)
+                reward = self._calculate_intrinsic_reward(environment_reward, player_id)
                 curr_rewards.append(reward)
         
-                temporal_difference_error = reward + self.gamma * bot.predict_state(state) - bot.predict_state(next_state)
+                temporal_difference_error = reward + self.gamma * bot.predict_state(state, perfect_state) - bot.predict_state(next_state, next_perfect_state)
                 temporal_difference_errors.append(temporal_difference_error)
                 state = next_state
             
@@ -108,7 +113,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 
     
 
-    def _calculate_intrinsic_reward(self, state, environment_reward:float, player_id:int, ):
+    def _calculate_intrinsic_reward(self, environment_reward:float, player_id:int, ):
         """
         Computes intrinsic reward based on progress in minimizing splits and reducing cards.
         """
@@ -131,17 +136,19 @@ class RARSMSBotTrainer(BaseTrainer):
         r_peasant_up = (L -Lt + N - Ct) /  (L + N)
 
         r_peasants = max(r_peasant_down + self.beta*r_peasant_up, r_peasant_up + self.beta*r_peasant_down)
-        r = torch.clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
+        r = self._clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
 
         self.r_landlord_prev = r_landlord
         self.r_peasants_prev = r_peasants
 
-
-
         return r
     
+    
+    def _clamp(self, value, min_value, max_value):
+        """ Clamps value between min_value and max_value"""
+        return max(min_value, min(value, max_value))
 
-    def _calculate_minimum_splits(self, player_id: int, initial_hand:bool):
+    def _calculate_minimum_splits(self, player_id: int, use_initial_hand:bool):
         """
         Returns a tuple of the minimum split and the number of cards in the hand for current
         state. If initial_hand is true, then returns the minimum split, and the number of 
@@ -152,10 +159,14 @@ class RARSMSBotTrainer(BaseTrainer):
         RANK_INDEX = {rank: i for i, rank in enumerate(RANK_ORDER)}
 
         state = self.env.get_state(player_id)
-        if initial_hand:
-            hand = state['initial_hand']
+
+        if use_initial_hand:
+            if self.initial_hand:
+                hand = self.initial_hand
+            else:
+                hand = state['raw_obs']['current_hand']
         else:
-            hand = state['current_hand']
+            hand = state['raw_obs']['current_hand']
 
         # Convert current_hand string to X vector (counts per rank)
         X = [0] * 15
