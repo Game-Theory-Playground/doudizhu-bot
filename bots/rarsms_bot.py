@@ -1,6 +1,4 @@
 from .base_bot import BaseBot
-from rlcard.games.doudizhu.utils.action_encoding import ID_TO_ACTION, ACTION_ID_DICT
-
 
 import torch
 import torch.nn as nn
@@ -255,9 +253,8 @@ class RARSMSBot(BaseBot):
         self.use_raw = True
         
         # Set device - use CUDA if available by default
-        self.device = device if device is not None else (
-            'cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        self.device = torch.device(device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu'))
+
         
         # Initialize networks
         self.actor_network = ActorNetwork()
@@ -280,6 +277,9 @@ class RARSMSBot(BaseBot):
             weights_only=False
         )
         
+        if hasattr(dmc_agent, 'device'):
+            dmc_agent.device = self.device
+
         if hasattr(dmc_agent, 'to'):
             dmc_agent.to(self.device)
         if hasattr(dmc_agent, 'eval'):
@@ -315,10 +315,11 @@ class RARSMSBot(BaseBot):
             masked_probs /= masked_probs.sum()
         else:
             masked_probs = legal_actions / legal_actions.sum()
-
+        
         rarsms_action_id = torch.argmax(masked_probs).item()
+        print("masked_probs shape:", masked_probs.shape)
 
-        log_prog = torch.log(masked_probs[rarsms_action_id] + 1e-8).item()
+        log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8).item()
 
         # === Step 2: Get DouZeroX candidate actions ===
         action_idx, metadata = self.dmc_agent.step(state)
@@ -389,7 +390,7 @@ class RARSMSBot(BaseBot):
             selected_action = action_idx
 
 
-        log_prog = torch.log(masked_probs[selected_action] + 1e-8).item()
+        log_prog = torch.log(masked_probs[0, selected_action] + 1e-8).item()
 
         return  log_prog
     

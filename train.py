@@ -12,7 +12,8 @@ from trainers.rarsms_trainer import RARSMSBotTrainer
 
 def main():
     parser = argparse.ArgumentParser("Bot training for Doudizhu")
-    parser.add_argument('--algorithm', choices=['dmc', 'rarsms'])
+    parser.add_argument('--algorithm', choices=['dmc', 'rarsms']) 
+    parser.add_argument('--douzerox_path')
     parser.add_argument('--savedir', default='results/')
     parser.add_argument('--cuda', type=str, default='')
     parser.add_argument('--save_interval', type=int, default=30)
@@ -37,6 +38,7 @@ def main():
     elif  args.algorithm == 'rarsms':
         trainer = RARSMSBotTrainer(
             env=env,
+            douzerox_path = args.douzerox_path,
             savedir = args.savedir,
             cuda=args.cuda,
             save_interval=args.save_interval,

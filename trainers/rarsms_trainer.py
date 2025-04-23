@@ -5,9 +5,11 @@ import torch.optim as optim
 import sys
 
 class RARSMSBotTrainer(BaseTrainer):
-    def __init__(self, env, savedir, cuda, save_interval,  num_actor_devices,num_actors, training_device, 
+    def __init__(self, env, douzerox_path, savedir, cuda, save_interval,  num_actor_devices,num_actors, training_device, 
                  learning_rate=0.001, batch_size=32, num_episodes=10000):
         super().__init__(env, savedir)
+
+        self.douzerox_path = douzerox_path
         self.learning_rate = learning_rate
         # self.batch_size = batch_size
         self.num_episodes = num_episodes
@@ -33,7 +35,7 @@ class RARSMSBotTrainer(BaseTrainer):
         device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() else "cpu")
         
         # Create bot instance 
-        bot = RARSMSBot()
+        bot = RARSMSBot(self.douzerox_path)
         bot.set_device(device)
         
         # Create optimizers
