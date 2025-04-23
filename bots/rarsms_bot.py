@@ -299,50 +299,17 @@ class RARSMSBot(BaseBot):
         and DouZeroX filtering for optimal play.
         """
         # === Step 1: RARSMS forward pass ===
-        imperfect_features = self._extract_imperfect_features(state)
-        history_features = self._extract_history_features(state)
-
-        with torch.no_grad():
-            action_probs = self.actor_network(
-                imperfect_features, 
-                history_features
-            )
-
-        legal_actions = self._get_legal_actions_mask(state)
-        masked_probs = action_probs * legal_actions
-
-        if masked_probs.sum() > 0:
-            masked_probs /= masked_probs.sum()
-        else:
-            masked_probs = legal_actions / legal_actions.sum()
-        
+        masked_probs =  self._get_actor_masked_probs(state)
         rarsms_action_id = torch.argmax(masked_probs).item()
-        print("masked_probs shape:", masked_probs.shape)
+
+        # === Step 2: Convert abstract action to real action ===
+        selected_action = self._convert_abstract_action_to_real(state, rarsms_action_id)
 
         log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8).item()
 
-        # === Step 2: Get DouZeroX candidate actions ===
-        action_idx, metadata = self.dmc_agent.step(state)
-        legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
-
-        # === Step 3: Map DouZeroX concrete actions to abstract IDs and filter ===
-        candidates = []
-        for act_str in legal_action_strs:
-            real_id = ACTION_2_ID.get(act_str)
-            if real_id is None:
-                continue
-            if REAL_TO_ABS[real_id] == rarsms_action_id:
-                candidates.append((act_str, metadata['values'][act_str]))
-
-        # === Step 4: Pick best candidate, or fallback ===
-        if candidates:
-            # Choose the one with highest DMC probability
-            selected_action = max(candidates, key=lambda x: x[1])[0]
-        else:
-            # No match: fallback to most probable action produced by DouZeroX
-            selected_action = action_idx
 
         return (selected_action, log_prog)
+
 
     def get_log_prob(self, state, action):
         """
@@ -350,49 +317,14 @@ class RARSMSBot(BaseBot):
         of the action being played.
         """
         # === Step 1: RARSMS forward pass ===
-        imperfect_features = self._extract_imperfect_features(state)
-        history_features = self._extract_history_features(state)
+        masked_probs =  self._get_actor_masked_probs(state)
 
-        with torch.no_grad():
-            action_probs = self.actor_network(
-                imperfect_features, 
-                history_features
-            )
-
-        legal_actions = self._get_legal_actions_mask(state)
-        masked_probs = action_probs * legal_actions
-
-        if masked_probs.sum() > 0:
-            masked_probs /= masked_probs.sum()
-        else:
-            masked_probs = legal_actions / legal_actions.sum()
-
-
-        # === Step 2: Get DouZeroX candidate actions ===
-        action_idx, metadata = self.dmc_agent.step(state)
-        legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
-
-        # === Step 3: Map DouZeroX concrete actions to abstract IDs and filter ===
-        candidates = []
-        for act_str in legal_action_strs:
-            real_id = ACTION_2_ID.get(act_str)
-            if real_id is None:
-                continue
-            if REAL_TO_ABS[real_id] == action:
-                candidates.append((act_str, metadata['values'][act_str]))
-
-        # === Step 4: Pick best candidate, or fallback ===
-        if candidates:
-            # Choose the one with highest DMC probability
-            selected_action = max(candidates, key=lambda x: x[1])[0]
-        else:
-            # No match: fallback to most probable action produced by DouZeroX
-            selected_action = action_idx
-
+        # === Step 2: Convert abstract action to real action ===
+        selected_action = self._convert_abstract_action_to_real(state, action)
 
         log_prog = torch.log(masked_probs[0, selected_action] + 1e-8).item()
 
-        return  log_prog
+        return log_prog
     
 
     def predict_state(self, state):
@@ -411,9 +343,68 @@ class RARSMSBot(BaseBot):
         with torch.no_grad():
             expected_reward = self.actor_network(imperfect_features, history_features, perfect_features)
 
-            
         return expected_reward
     
+
+    def _get_actor_masked_probs(self, state):
+        """
+        Returns the legal masked probabilities of the actor network
+        give the current state
+        """
+
+        imperfect_features = self._extract_imperfect_features(state)
+        history_features = self._extract_history_features(state)
+
+        with torch.no_grad():
+            action_probs = self.actor_network(
+                imperfect_features, 
+                history_features
+            )
+
+        legal_actions = self._get_legal_actions_mask(state)
+        masked_probs = action_probs * legal_actions
+
+        if masked_probs.sum() > 0:
+            masked_probs /= masked_probs.sum()
+        else:
+            masked_probs = legal_actions / legal_actions.sum()
+
+        return masked_probs
+    
+    
+    def _convert_abstract_action_to_real(self, state, abstract_action):
+        """
+        Use DouzeroX to convert abstract actions to real actions, given
+        the current state.
+        """
+
+        # === Step 1: Get DouZeroX candidate actions ===
+        action_idx, metadata = self.dmc_agent.eval_step(state)
+        legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
+
+        # === Step 2: Map DouZeroX concrete actions to abstract IDs and filter ===
+        candidates = []
+        for act_str in legal_action_strs:
+            real_id = ACTION_2_ID.get(act_str)
+            if real_id is None:
+                continue
+            if REAL_TO_ABS[real_id] == abstract_action:
+                candidates.append((act_str, metadata['values'][act_str]))
+
+        # === Step 3: Pick best candidate, or fallback ===
+        if candidates:
+            # Choose the one with highest DMC probability
+            selected_action = max(candidates, key=lambda x: x[1])[0]
+        else:
+            # No match: fallback to most probable action produced by DouZeroX
+            selected_action = action_idx
+        
+        selected_action = int(selected_action)
+        
+        print("SELECTED ACTION", selected_action)
+        
+        return selected_action
+        
 
     def _extract_imperfect_features(self, state):
         """
