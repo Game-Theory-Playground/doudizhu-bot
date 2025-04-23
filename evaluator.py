@@ -58,7 +58,7 @@ def evaluate(args):
 
 if __name__ == '__main__':
     parser.add_argument('--bots', nargs='*', default=[
-        'dmc:results/dmc/1742603200/0_14947200.pth',
+        'dmc:results/dmc/1742603200/0_220153600.pth',
         'random',
         'random'
     ])
