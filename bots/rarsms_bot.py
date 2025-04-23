@@ -149,7 +149,9 @@ class ResNetBackbone(nn.Module):
         
     def forward(self, x):
         x = self.initial_conv(x)
+        print(f"x shape: {x.shape}")
         x = self.layers(x)
+        print(f"x shape: {x.shape}")
         return x
         
     def _create_layers(self):
@@ -235,6 +237,7 @@ class CriticNetwork(nn.Module):
     def forward(self, imperfect, history, perfect):
         """Process state features and output state value"""
         x = torch.cat([imperfect, history, perfect], dim=0)
+        x = x.unsqueeze(0)
         x = self.backbone(x)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
@@ -341,7 +344,7 @@ class RARSMSBot(BaseBot):
 
         # Forward pass through actor network (without perfect features during play)
         with torch.no_grad():
-            expected_reward = self.actor_network(imperfect_features, history_features, perfect_features)
+            expected_reward = self.critic_network(imperfect_features, history_features, perfect_features)
 
         return expected_reward
     
