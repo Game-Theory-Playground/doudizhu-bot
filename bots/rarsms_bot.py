@@ -4,24 +4,123 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import Counter
+from rlcard.games.doudizhu.utils import ACTION_2_ID
 
 # Card ordering for Dou Dizhu (Fighting the Landlord)
 CARD_ORDER = ['3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A', '2', 'BJ', 'RJ']
 SPECIFIC_MAP = {card: idx for idx, card in enumerate(CARD_ORDER)}
 
+# Mapping from abstraction action to real action
+# see https://rlcard.org/games.html#dou-dizhu for more details
+def build_real_action_id_to_abstraction_id() -> list[int]:
+    """
+    Builds a list mapping from real action ID (0–27471) to abstract action ID (0–308),
+    strictly following the abstract ID ordering and applying manual subgroup logic when needed.
+    """
+    mapping = [None] * 27472
+    current_real_id = 0
+
+    grouped_blocks = [
+        (0, 15, 15),       # Solo, evenly
+        (15, 13, 13),      # Pair, evenly
+        (28, 13, 13),      # Trio, evenly
+        (41, 13, 182),     # Trio with single, evenly
+        (54, 13, 156),     # Trio with pair, evenly
+        (67, 36, 36),      # Chain of solo, evenly
+        (103, 52, 52),     # Chain of pair, evenly
+        (155, 45, 45),     # Chain of trio, evenly
+        (200, 11, 968),    # Plane with solo 1, evenly
+        (211, 10, 3282),   # Plane with solo 2, custom distribution
+        (221, 9, 7184),    # Plane with solo 3, custom distribution
+        (230, 8, 10388),   # Plane with solo 4, custom distribution
+        (238, 11, 605),    # Plane with pair 1, evenly
+        (249, 10, 1200),   # Plane with pair 2, evenly
+        (259, 9, 1134),    # Plane with pair 3, evenly
+        (268, 13, 1326),   # Quad with solo, evenly
+        (281, 13, 858),    # Quad with pair, evenly
+        (294, 13, 13),     # Bomb, evenly
+        (307, 1, 1),       # Rocket, evenly
+        (308, 1, 1),       # Pass, evenly
+    ]
+
+    for abs_start, num_abs, num_real in grouped_blocks:
+        # Special cases for uneven distributions
+        if abs_start == 211 and num_abs == 10 and num_real == 3282:
+            # Plane with solo 2: 10 → [329, 328, ..., 328, 329]
+            for i in range(10):
+                abstract_id = abs_start + i
+                count = 329 if i in (0, 9) else 328
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+        elif abs_start == 221 and num_abs == 9 and num_real == 7184:
+            # Plane with solo 3: 9 → [806, 796, ..., 796, 806]
+            for i in range(9):
+                abstract_id = abs_start + i
+                count = 806 if i in (0, 8) else 796
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+        elif abs_start == 230 and num_abs == 8 and num_real == 10388:
+            # Plane with solo 4: 8 → [1330, 1288, ..., 1288, 1330]
+            for i in range(8):
+                abstract_id = abs_start + i
+                count = 1330 if i in (0, 7) else 1288
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+        else:
+            # Evenly distribute or use +1 for remainder
+            real_per_abs = num_real // num_abs
+            extras = num_real % num_abs
+            for i in range(num_abs):
+                abstract_id = abs_start + i
+                count = real_per_abs + (1 if i < extras else 0)
+                for _ in range(count):
+                    mapping[current_real_id] = abstract_id
+                    current_real_id += 1
+
+    return mapping
+# Global mapping from real action IDs to abstract action IDs
+REAL_TO_ABS = build_real_action_id_to_abstraction_id()
+
+
 class ResidualBlock(nn.Module):
     """Basic ResNet-18 block with skip connections"""
+    
     def __init__(self, in_channels, out_channels, stride=1):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        super().__init__()
+        self.conv1 = nn.Conv1d(
+            in_channels, 
+            out_channels, 
+            kernel_size=3, 
+            stride=stride, 
+            padding=1, 
+            bias=False
+        )
         self.bn1 = nn.BatchNorm1d(out_channels)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv1d(
+            out_channels, 
+            out_channels, 
+            kernel_size=3, 
+            padding=1, 
+            bias=False
+        )
         self.bn2 = nn.BatchNorm1d(out_channels)
         
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.Conv1d(
+                    in_channels, 
+                    out_channels, 
+                    kernel_size=1, 
+                    stride=stride, 
+                    bias=False
+                ),
                 nn.BatchNorm1d(out_channels)
             )
             
@@ -31,11 +130,13 @@ class ResidualBlock(nn.Module):
         out += self.shortcut(x)
         out = F.relu(out)
         return out
-    
+
+
 class ResNetBackbone(nn.Module):
     """Shared ResNet-18 backbone implementation for both Actor and Critic networks"""
+    
     def __init__(self, in_channels=64):
-        super(ResNetBackbone, self).__init__()
+        super().__init__()
         
         # Initial convolution layer
         self.initial_conv = nn.Sequential(
@@ -89,8 +190,10 @@ class ResNetBackbone(nn.Module):
         
         return backbone
 
+
 class ActorNetwork(nn.Module):
     """Actor network that outputs action probabilities"""
+    
     def __init__(self):
         super().__init__()
         # Backbone network processing input features
@@ -116,8 +219,10 @@ class ActorNetwork(nn.Module):
         x = self.fc2(x)
         return self.softmax(x)
 
+
 class CriticNetwork(nn.Module):
     """Critic network that estimates state values"""
+    
     def __init__(self):
         super().__init__()
         # Backbone network processing input features
@@ -134,25 +239,50 @@ class CriticNetwork(nn.Module):
         x = self.fc2(x)
         return x  # V(s_t)
 
+
 class RARSMSBot(BaseBot):
-    """Reinforcement Learning bot for Dou Dizhu using Actor-Critic architecture."""
+    """
+    Reinforcement Learning bot for Dou Dizhu using Actor-Critic architecture.
+    """
     
     def __init__(self, douzerox_path, position=None, device=None):
         super().__init__(position)
 
-        # Recoding features from raw information from RLCard environment
+        # Record features from raw information from RLCard environment
         self.use_raw = True
         
         # Set device - use CUDA if available by default
-        self.device = device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device if device is not None else (
+            'cuda' if torch.cuda.is_available() else 'cpu'
+        )
         
         # Initialize networks
         self.actor_network = ActorNetwork()
         self.critic_network = CriticNetwork()
+        self.dmc_agent = self._load_dmc_agent(douzerox_path)
         
         # Move networks to the selected device
         self.actor_network.to(self.device)
         self.critic_network.to(self.device)
+    
+    def _load_dmc_agent(self, model_path):
+        """Load DMC agent from model path"""
+        from rlcard.agents.dmc_agent.model import DMCAgent
+        from torch.serialization import add_safe_globals
+        add_safe_globals([DMCAgent])
+         
+        dmc_agent = torch.load(
+            model_path, 
+            map_location=self.device, 
+            weights_only=False
+        )
+        
+        if hasattr(dmc_agent, 'to'):
+            dmc_agent.to(self.device)
+        if hasattr(dmc_agent, 'eval'):
+            dmc_agent.eval()
+        
+        return dmc_agent
     
     def set_device(self, device):
         """Set the computation device (CPU/GPU)."""
@@ -161,32 +291,52 @@ class RARSMSBot(BaseBot):
         self.critic_network.to(device)
         
     def act(self, state):
-        """Select an action based on current state."""
-        # Extract features
+        """
+        Select an action based on current state, combining RARSMS reasoning
+        and DouZeroX filtering for optimal play.
+        """
+        # === Step 1: RARSMS forward pass ===
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
-        
-        # Forward pass through actor network (without perfect features during play)
+
         with torch.no_grad():
-            action_probs = self.actor_network(imperfect_features, history_features)
-            
-        # Get legal actions mask and apply it
+            action_probs = self.actor_network(
+                imperfect_features, 
+                history_features
+            )
+
         legal_actions = self._get_legal_actions_mask(state)
         masked_probs = action_probs * legal_actions
-        
-        # Renormalize probabilities
-        if masked_probs.sum() > 0:
-            masked_probs = masked_probs / masked_probs.sum()
-        else:
-            # If all actions are masked, use uniform distribution
-            masked_probs = legal_actions / legal_actions.sum()
-        
-        # Choose action with highest probability
-        action_id = torch.argmax(masked_probs).item()
 
-        
-        return action_id
-    
+        if masked_probs.sum() > 0:
+            masked_probs /= masked_probs.sum()
+        else:
+            masked_probs = legal_actions / legal_actions.sum()
+
+        rarsms_action_id = torch.argmax(masked_probs).item()
+
+        # === Step 2: Get DouZeroX candidate actions ===
+        action_idx, metadata = self.dmc_agent.step(state)
+        legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
+
+        # === Step 3: Map DouZeroX concrete actions to abstract IDs and filter ===
+        candidates = []
+        for act_str in legal_action_strs:
+            real_id = ACTION_2_ID.get(act_str)
+            if real_id is None:
+                continue
+            if REAL_TO_ABS[real_id] == rarsms_action_id:
+                candidates.append((act_str, metadata['values'][act_str]))
+
+        # === Step 4: Pick best candidate, or fallback ===
+        if candidates:
+            # Choose the one with highest DMC probability
+            selected_action = max(candidates, key=lambda x: x[1])[0]
+        else:
+            # No match: fallback to most probable action produced by DouZeroX
+            selected_action = action_idx
+
+        return (selected_action, metadata)
 
     def _extract_imperfect_features(self, state):
         """
@@ -211,7 +361,9 @@ class RARSMSBot(BaseBot):
         feat[0][bombs_played - 1] = 1
 
         # 1. Other players' hand count
-        total_other_cards = sum(num_cards_left[i] for i in range(3) if i != role_id)
+        total_other_cards = sum(
+            num_cards_left[i] for i in range(3) if i != role_id
+        )
         feat[1][total_other_cards - 1] = 1
 
         # 2. Seen cards
@@ -265,7 +417,11 @@ class RARSMSBot(BaseBot):
         else:
             base_bits = [1, 0]  # Farmer 2
             
-        identity[:18] = torch.tensor(base_bits * 9, dtype=torch.float, device=self.device)
+        identity[:18] = torch.tensor(
+            base_bits * 9, 
+            dtype=torch.float, 
+            device=self.device
+        )
         identity[18:34] = 1 if player_id == 0 else 0  # Is landlord?
         identity[34 + cards_left - 1] = 1  # Cards left
         
@@ -274,9 +430,9 @@ class RARSMSBot(BaseBot):
     def _encode_card_counts(self, num_cards_left):
         """Encode card counts for all players."""
         counts = torch.zeros(54, device=self.device)
-        counts[num_cards_left[0] - 1] = 1  # Player 0 cards
-        counts[20 + num_cards_left[1] - 1] = 1  # Player 1 cards
-        counts[37 + num_cards_left[2] - 1] = 1  # Player 2 cards
+        counts[num_cards_left[0] - 1] = 1          # Player 0 cards
+        counts[20 + num_cards_left[1] - 1] = 1     # Player 1 cards
+        counts[37 + num_cards_left[2] - 1] = 1     # Player 2 cards
         return counts
 
     def _encode_last_action(self, trace, num_cards_left):
@@ -284,7 +440,10 @@ class RARSMSBot(BaseBot):
         last_action = torch.zeros(2, 54, device=self.device)
         
         # Find the last non-pass action
-        last = next(((pid, act) for pid, act in reversed(trace) if act != 'pass'), None)
+        last = next(
+            ((pid, act) for pid, act in reversed(trace) if act != 'pass'), 
+            None
+        )
         
         if last:
             pid, act = last
@@ -356,7 +515,8 @@ class RARSMSBot(BaseBot):
         """Create a binary mask for legal actions."""
         mask = torch.zeros(309, device=self.device)
         for action_id in state['legal_actions']:
-            mask[action_id] = 1.0
+            abstraction_id = REAL_TO_ABS[action_id]
+            mask[abstraction_id] = 1.0
         return mask
     
     def _cards_to_tensor(self, cards):
