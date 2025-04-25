@@ -306,7 +306,7 @@ class RARSMSBot(BaseBot):
         # === Step 2: Convert abstract action to real action ===
         selected_action = self._convert_abstract_action_to_real(state, rarsms_action_id)
 
-        log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8).item()
+        log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8)
 
 
         return (selected_action, log_prog)

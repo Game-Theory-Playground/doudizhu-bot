@@ -3,6 +3,7 @@ from bots import RARSMSBot
 import torch
 import torch.optim as optim
 import sys
+import copy
 
 
 class RARSMSBotTrainer(BaseTrainer):
@@ -88,30 +89,33 @@ class RARSMSBotTrainer(BaseTrainer):
             2: peasant_down_bot  # Player 2 is now peasant down (before landlord)
         }
         
-        # Store previous states, actions and probs for all players
-        old_player_data = {
-            player_id: {'states': [], 'perfect_states': [], 'actions': [], 'probs': [], 
-                        'rewards': [], 'td_errors': []}
-            for player_id in range(3)
-        }
-
-        # Each Game (Episode)
-        for episode in range(self.num_episodes):
-            # Reset environment
-            state, player_id = self.env.reset()
-
-            # Initialize data collection for the current episode
-            curr_player_data = {
+        curr_player_data = {
                 player_id: {
                     'states': [],
                     'perfect_states': [],
                     'actions': [],
                     'probs': [],
                     'rewards': [],
-                    'td_errors': []
+                    'td_errors': [],
+                    'old_bot': None,
                 }
                 for player_id in range(3)
             }
+
+        # Each Game (Episode)
+        for episode in range(self.num_episodes):
+            # Reset environment
+            state, player_id = self.env.reset()
+
+            # Clear data collection for the current episode except old actor network
+            for p_id in range(3):
+                curr_player_data[p_id]['states'] = []
+                curr_player_data[p_id]['perfect_states'] = []
+                curr_player_data[p_id]['actions'] = []
+                curr_player_data[p_id]['probs'] = []
+                curr_player_data[p_id]['rewards'] = []
+                curr_player_data[p_id]['td_errors'] = []
+
             
             # Reset rewards
             self.r_landlord_prev = 0
@@ -162,21 +166,23 @@ class RARSMSBotTrainer(BaseTrainer):
             # After episode is over, update each bot
             for player_id in range(3):
                 current_bot = bots[player_id]
-                
+    
                 # Skip if no data collected for this player
                 if not curr_player_data[player_id]['states']:
                     continue
+
+
                 
                 # Calculate advantage function
                 advantage_function = self._calculate_advantage(curr_player_data[player_id]['td_errors'])
                 
                 # Calculate losses
                 actor_loss = self._calculate_actor_loss(
-                    current_bot, 
+                    curr_player_data[player_id]['old_bot'],
                     advantage_function,
-                    old_player_data[player_id]['states'],
-                    old_player_data[player_id]['actions'],
-                    old_player_data[player_id]['probs']
+                    curr_player_data[player_id]['states'],
+                    curr_player_data[player_id]['actions'],
+                    curr_player_data[player_id]['probs']
                 )
                 
                 critic_loss = self._calculate_critic_loss(
@@ -201,10 +207,8 @@ class RARSMSBotTrainer(BaseTrainer):
                 critic_loss.backward()
                 optimizers[player_id]['critic'].step()
                 
-                # Store current data as old data for next episode
-                old_player_data[player_id]['states'] = curr_player_data[player_id]['states']
-                old_player_data[player_id]['actions'] = curr_player_data[player_id]['actions']
-                old_player_data[player_id]['probs'] = curr_player_data[player_id]['probs']
+                # Store current model as old data for next episode
+                curr_player_data[player_id]['old_bot'] = copy.deepcopy(current_bot)
             
             # Save models periodically
             if episode % self.save_interval == 0:
@@ -390,23 +394,24 @@ class RARSMSBotTrainer(BaseTrainer):
             
         return advantage_function
 
-    def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
+    def _calculate_actor_loss(self, old_bot, advantage_function, states, actions, probs):
         """ 
         PPO Clipped Objective Function.
         """
         # Handle empty data case
-        if not old_states:
+        if not states or not old_bot:
             return torch.tensor(0.0, requires_grad=True)
             
-        old_probs = torch.tensor(old_probs, dtype=torch.float32)
-        advantages = torch.tensor(advantage_function, dtype=torch.float32)
+        probs = torch.stack(probs)
         
-        probs = []
+        advantages = torch.tensor(advantage_function, dtype=torch.float32, device=self.device)
         
-        for state, action in zip(old_states, old_actions):
-            prob = bot.get_log_prob(state, action)
-            probs.append(prob)
-        probs = torch.tensor(probs, dtype=torch.float32)
+        old_probs = []
+        
+        for state, action in zip(states, actions):
+            prob = old_bot.get_log_prob(state, action)
+            old_probs.append(prob)
+        old_probs = torch.tensor(old_probs, dtype=torch.float32, device=self.device)
         
         ratios = torch.exp(probs - old_probs)
         clipped_ratios = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon)
