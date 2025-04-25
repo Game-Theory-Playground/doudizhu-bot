@@ -392,7 +392,7 @@ class RARSMSBot(BaseBot):
             if real_id is None:
                 continue
             if REAL_TO_ABS[real_id] == abstract_action:
-                candidates.append((act_str, metadata['values'][act_str]))
+                candidates.append((real_id, metadata['values'][act_str]))
 
         # === Step 3: Pick best candidate, or fallback ===
         if candidates:

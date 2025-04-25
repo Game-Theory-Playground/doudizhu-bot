@@ -13,7 +13,12 @@ from trainers.rarsms_trainer import RARSMSBotTrainer
 def main():
     parser = argparse.ArgumentParser("Bot training for Doudizhu")
     parser.add_argument('--algorithm', choices=['dmc', 'rarsms']) 
-    parser.add_argument('--douzerox_path')
+    
+    # Update to have separate paths for each role
+    parser.add_argument('--landlord_path', help='Path to DouZeroX weights for the landlord')
+    parser.add_argument('--peasant_up_path', help='Path to DouZeroX weights for the peasant after landlord')
+    parser.add_argument('--peasant_down_path', help='Path to DouZeroX weights for the peasant before landlord')
+    
     parser.add_argument('--savedir', default='results/')
     parser.add_argument('--cuda', type=str, default='')
     parser.add_argument('--save_interval', type=int, default=30)
@@ -35,11 +40,24 @@ def main():
             training_device=args.training_device,
         )
         trainer.train()
-    elif  args.algorithm == 'rarsms':
+    elif args.algorithm == 'rarsms':
+        # Collect all three paths in a list
+        douzerox_paths = [
+            args.landlord_path,
+            args.peasant_up_path,
+            args.peasant_down_path
+        ]
+        
+        # Check if all required paths are provided
+        if None in douzerox_paths:
+            # If any path is missing, raise an error
+            parser.error("When using 'rarsms' algorithm, you must provide all three paths: "
+                         "--landlord_path, --peasant_up_path, and --peasant_down_path")
+        
         trainer = RARSMSBotTrainer(
             env=env,
-            douzerox_path = args.douzerox_path,
-            savedir = args.savedir,
+            douzerox_paths=douzerox_paths,  # Pass the list of paths
+            savedir=args.savedir,
             cuda=args.cuda,
             save_interval=args.save_interval,
             num_actor_devices=args.num_actor_devices,

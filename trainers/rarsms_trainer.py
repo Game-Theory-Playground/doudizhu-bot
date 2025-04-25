@@ -4,190 +4,309 @@ import torch
 import torch.optim as optim
 import sys
 
+
 class RARSMSBotTrainer(BaseTrainer):
-    def __init__(self, env, douzerox_path, savedir, cuda, save_interval,  num_actor_devices,num_actors, training_device, 
-                 learning_rate=0.001, batch_size=32, num_episodes=10000):
+    def __init__(
+        self,
+        env,
+        douzerox_paths,  # Now accepts a list of three paths
+        savedir,
+        cuda,
+        save_interval,
+        num_actor_devices,
+        num_actors,
+        training_device,
+        learning_rate=0.001,
+        batch_size=32,
+        num_episodes=10000,
+    ):
         super().__init__(env, savedir)
 
-        self.douzerox_path = douzerox_path
+        # Unpack paths for each role
+        self.landlord_path = douzerox_paths[0]
+        self.peasant_up_path = douzerox_paths[1]    # Peasant after landlord (landlord-up)
+        self.peasant_down_path = douzerox_paths[2]  # Peasant before landlord
+        
         self.learning_rate = learning_rate
-        # self.batch_size = batch_size
         self.num_episodes = num_episodes
         self.cuda = cuda
         self.training_device = training_device
+        self.save_interval = save_interval
 
         # Hyperparameters
         self.gamma = 0.001
-        self.lmda = 0.001 
-        self.epsilon = 0.1 
+        self.lmda = 0.001
+        self.epsilon = 0.1
         self.beta = 0.5  # Weights cooperation of peasants (0 no cooperation -> 1 cooperation)
 
-        # Other required variables
-        # Prior rewards
+        # Prior rewards for each role
         self.r_landlord_prev = 0
+        self.r_peasant_down_prev = 0
+        self.r_peasant_up_prev = 0
         self.r_peasants_prev = 0
 
-        self.initial_hand = ''
-
-        self.train()
-
+        self.initial_hands = {0: '', 1: '', 2: ''}  # Store initial hands for all players
 
     def train(self):
         # Set CUDA device
-        device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() else "cpu")
+        device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() and self.cuda else "cpu")
         
-        # Create bot instance 
-        bot = RARSMSBot(self.douzerox_path)
-        bot.set_device(device)
+        # Create bot instances for each role
+        landlord_bot = RARSMSBot(self.landlord_path)
+        peasant_up_bot = RARSMSBot(self.peasant_up_path)     # Peasant after landlord (landlord-up)
+        peasant_down_bot = RARSMSBot(self.peasant_down_path) # Peasant before landlord
         
-        # Create optimizers
-        actor_optimizer = optim.Adam(bot.actor_network.parameters(), lr=self.learning_rate)
-        critic_optimizer = optim.Adam(bot.critic_network.parameters(), lr=self.learning_rate)
+        # Set device for each bot
+        landlord_bot.set_device(device)
+        peasant_up_bot.set_device(device)
+        peasant_down_bot.set_device(device)
         
-        old_states = []
-        old_actions = []
-        old_probs = []
+        # Create optimizers for each bot
+        optimizers = {
+            # Landlord optimizers
+            0: {
+                'actor': optim.Adam(landlord_bot.actor_network.parameters(), lr=self.learning_rate),
+                'critic': optim.Adam(landlord_bot.critic_network.parameters(), lr=self.learning_rate)
+            },
+            # Peasant down optimizers
+            1: {
+                'actor': optim.Adam(peasant_down_bot.actor_network.parameters(), lr=self.learning_rate),
+                'critic': optim.Adam(peasant_down_bot.critic_network.parameters(), lr=self.learning_rate)
+            },
+            # Peasant up optimizers
+            2: {
+                'actor': optim.Adam(peasant_up_bot.actor_network.parameters(), lr=self.learning_rate),
+                'critic': optim.Adam(peasant_up_bot.critic_network.parameters(), lr=self.learning_rate)
+            }
+        }
+        
+        # Create a mapping between player_id and bots
+        bots = {
+            0: landlord_bot,
+            1: peasant_up_bot,   # Player 1 is now peasant up (after landlord)
+            2: peasant_down_bot  # Player 2 is now peasant down (before landlord)
+        }
+        
+        # Store previous states, actions and probs for all players
+        old_player_data = {
+            player_id: {'states': [], 'actions': [], 'probs': []}
+            for player_id in range(3)
+        }
 
         # Each Game (Episode)
         for episode in range(self.num_episodes):
-
             # Reset environment
             state, player_id = self.env.reset()
 
-            curr_states = []
-            curr_actions = []
-            curr_probs = []
-            curr_rewards = []
-            self.r_landlord_prev = 0
-            self.r_peasants_prev = 0
-            temporal_difference_errors = []
-            self.initial_hand = ''
+            # Initialize data collection for the current episode
+            curr_player_data = {
+                player_id: {
+                    'states': [],
+                    'actions': [],
+                    'probs': [],
+                    'rewards': [],
+                    'td_errors': []
+                }
+                for player_id in range(3)
+            }
             
-        
+            # Reset rewards
+            self.r_landlord_prev = 0
+            self.r_peasant_down_prev = 0
+            self.r_peasant_up_prev = 0
+            
+            # Reset initial hands
+            self.initial_hands = {0: '', 1: '', 2: ''}
+            
             # Each round (frame)
             while not self.env.is_over():
-                # Choose action
-                action, prob = bot.act(state)
+                if self.initial_hands[player_id] == '':
+                    self.initial_hands[player_id] = state['raw_obs']['current_hand']
+
+                current_bot = bots[player_id]
+                
+                # Choose action using the appropriate bot
+                action, prob = current_bot.act(state)
                 perfect_state = self.env.get_perfect_information()
                 
-                curr_states.append(state)
-                curr_actions.append(action)
-                curr_probs.append(prob)
+                # Store current state, action, and probability
+                curr_player_data[player_id]['states'].append(state)
+                curr_player_data[player_id]['actions'].append(action)
+                curr_player_data[player_id]['probs'].append(prob)
                 
-                next_state, player_id = self.env.step(action)
+                # Take a step in the environment
+                next_state, next_player_id = self.env.step(action)
                 next_perfect_state = self.env.get_perfect_information()
                 
+                # Calculate rewards
                 environment_reward = self.env.get_payoffs()[player_id] if self.env.is_over() else 0
                 reward = self._calculate_intrinsic_reward(environment_reward, player_id)
-                curr_rewards.append(reward)
-        
-                temporal_difference_error = reward + self.gamma * bot.predict_state(state, perfect_state) - bot.predict_state(next_state, next_perfect_state)
-                temporal_difference_errors.append(temporal_difference_error)
+                curr_player_data[player_id]['rewards'].append(reward)
+                
+                # Calculate temporal difference error
+                td_error = (
+                    reward + 
+                    self.gamma * current_bot.predict_state(state, perfect_state) - 
+                    current_bot.predict_state(next_state, next_perfect_state)
+                )
+                curr_player_data[player_id]['td_errors'].append(td_error)
+                
+                # Update state and player
                 state = next_state
+                player_id = next_player_id
             
-
-            advantage_function = self._calculate_advantage(temporal_difference_errors)
-
-            actor_loss = self._calculate_actor_loss(bot, advantage_function, old_states, old_actions, old_probs)
-            critic_loss = self._calculate_critic_loss(bot, curr_states, curr_rewards)
-            print("EPISODE {episode}/{self.num_episodes} ACTOR LOSS: {actor_loss}")
-            print("EPISODE {episode}/{self.num_episodes} CRITIC LOSS: {critic_loss}")
-
-            actor_optimizer.zero_grad()
-            actor_loss.backward()
-            actor_optimizer.step()
-
-            critic_optimizer.zero_grad()
-            critic_loss.backward()
-            critic_optimizer.step()
-
-            old_states = curr_states
-            old_actions = curr_actions
-            old_probs = curr_probs
-
+            # After episode is over, update each bot
+            for player_id in range(3):
+                current_bot = bots[player_id]
+                
+                # Skip if no data collected for this player
+                if not curr_player_data[player_id]['states']:
+                    continue
+                
+                # Calculate advantage function
+                advantage_function = self._calculate_advantage(curr_player_data[player_id]['td_errors'])
+                
+                # Calculate losses
+                actor_loss = self._calculate_actor_loss(
+                    current_bot, 
+                    advantage_function,
+                    old_player_data[player_id]['states'],
+                    old_player_data[player_id]['actions'],
+                    old_player_data[player_id]['probs']
+                )
+                
+                critic_loss = self._calculate_critic_loss(
+                    current_bot,
+                    curr_player_data[player_id]['states'],
+                    curr_player_data[player_id]['rewards']
+                )
+                
+                # Print losses for monitoring
+                role = ["Landlord", "Peasant Up", "Peasant Down"][player_id]
+                print(f"EPISODE {episode}/{self.num_episodes} {role} ACTOR LOSS: {actor_loss.item()}")
+                print(f"EPISODE {episode}/{self.num_episodes} {role} CRITIC LOSS: {critic_loss.item()}")
+                
+                # Update actor network
+                optimizers[player_id]['actor'].zero_grad()
+                actor_loss.backward()
+                optimizers[player_id]['actor'].step()
+                
+                # Update critic network
+                optimizers[player_id]['critic'].zero_grad()
+                critic_loss.backward()
+                optimizers[player_id]['critic'].step()
+                
+                # Store current data as old data for next episode
+                old_player_data[player_id]['states'] = curr_player_data[player_id]['states']
+                old_player_data[player_id]['actions'] = curr_player_data[player_id]['actions']
+                old_player_data[player_id]['probs'] = curr_player_data[player_id]['probs']
             
-                
-            # Save model periodically
-            if episode % 100 == 0:
-                self._save_model(bot, episode)
-                
-    
+            # Save models periodically
+            if episode % self.save_interval == 0:
+                self._save_models(bots, episode)
 
-    def _calculate_intrinsic_reward(self, environment_reward:float, player_id:int, ):
+    def _save_models(self, bots, episode):
+        """Save all three models."""
+        for player_id, role in enumerate(["landlord", "peasant_up", "peasant_down"]):
+            self._save_model(bots[player_id], episode, role)
+
+    def _calculate_intrinsic_reward(self, environment_reward: float, player_id: int):
         """
         Computes intrinsic reward based on progress in minimizing splits and reducing cards.
         """
-
+        
+        # Set k based on player role
         if player_id == 0:  # Landlord
             k = 1
         else:  # Peasant
             k = -1/2
-
+            
+        # Calculate for landlord
         L, N = self._calculate_minimum_splits(0, True)
         Lt, Ct = self._calculate_minimum_splits(0, False)
-        r_landlord = (L -Lt + N - Ct) /  (L + N)
-
+        r_landlord = (L - Lt + N - Ct) / (L + N)
+        
+        # Calculate for peasant down
         L, N = self._calculate_minimum_splits(1, True)
         Lt, Ct = self._calculate_minimum_splits(1, False)
-        r_peasant_down = (L -Lt + N - Ct) /  (L + N)
-
+        r_peasant_down = (L - Lt + N - Ct) / (L + N)
+        
+        # Calculate for peasant up
         L, N = self._calculate_minimum_splits(2, True)
         Lt, Ct = self._calculate_minimum_splits(2, False)
-        r_peasant_up = (L -Lt + N - Ct) /  (L + N)
-
-        r_peasants = max(r_peasant_down + self.beta*r_peasant_up, r_peasant_up + self.beta*r_peasant_down)
-        r = self._clamp(r_landlord - r_peasants - (self.r_landlord_prev - self.r_peasants_prev), -1, 1) * 2 * environment_reward * k
-
+        r_peasant_up = (L - Lt + N - Ct) / (L + N)
+        
+        # Calculate cooperative reward for peasants
+        r_peasants = max(
+            r_peasant_down + self.beta * r_peasant_up,
+            r_peasant_up + self.beta * r_peasant_down
+        )
+        
+        # Calculate previous rewards delta based on player role
+        if player_id == 0:  # Landlord
+            prev_delta = self.r_landlord_prev - self.r_peasants_prev
+            r = self._clamp(r_landlord - r_peasants - prev_delta, -1, 1) * 2 * environment_reward * k
+            
+        elif player_id == 1:  # Peasant down
+            prev_delta = self.r_peasants_prev - self.r_landlord_prev
+            r = self._clamp(r_peasants - r_landlord - prev_delta, -1, 1) * 2 * environment_reward * k
+            
+        else:  # Peasant up
+            prev_delta = self.r_peasants_prev - self.r_landlord_prev
+            r = self._clamp(r_peasants - r_landlord - prev_delta, -1, 1) * 2 * environment_reward * k
+        
+        # Update previous rewards
         self.r_landlord_prev = r_landlord
+        self.r_peasant_down_prev = r_peasant_down
+        self.r_peasant_up_prev = r_peasant_up
         self.r_peasants_prev = r_peasants
-
+        
         return r
     
-    
     def _clamp(self, value, min_value, max_value):
-        """ Clamps value between min_value and max_value"""
+        """Clamps value between min_value and max_value"""
         return max(min_value, min(value, max_value))
 
-    def _calculate_minimum_splits(self, player_id: int, use_initial_hand:bool):
+    def _calculate_minimum_splits(self, player_id: int, use_initial_hand: bool):
         """
         Returns a tuple of the minimum split and the number of cards in the hand for current
         state. If initial_hand is true, then returns the minimum split, and the number of 
         cards in the hand for the players first hand at the beginning of the game.
         """
-
+        
         RANK_ORDER = '3456789TJQKA2BR'  # 15 ranks
         RANK_INDEX = {rank: i for i, rank in enumerate(RANK_ORDER)}
-
+        
         state = self.env.get_state(player_id)
-
+        
         if use_initial_hand:
-            if self.initial_hand:
-                hand = self.initial_hand
+            if self.initial_hands[player_id]:
+                hand = self.initial_hands[player_id]
             else:
                 hand = state['raw_obs']['current_hand']
         else:
             hand = state['raw_obs']['current_hand']
-
+            
         # Convert current_hand string to X vector (counts per rank)
         X = [0] * 15
         for card in hand:
             X[RANK_INDEX[card]] += 1
-
+            
         memo = {}
-
+        
         # Recursive function G
         def G(X):
-            # Check for memoization (optional for speed)
+            # Check for memoization
             key = tuple(X)
             if key in memo:
                 return memo[key]
-
+                
             # Base case: no cards left
             if sum(X) == 0:
                 return 0
-
+                
             L = sys.maxsize
-
+            
             # Try all chains and combos
             for p in range(12):  # up to 'A'
                 for m in range(1, 4):  # only consider m=1,2,3 for chain
@@ -233,7 +352,7 @@ class RARSMSBotTrainer(BaseTrainer):
                             if valid:
                                 # Can optionally add solos/pairs for Plane-Solo or Plane-Pair
                                 L = min(L, G(new_X) + 1)
-
+                                
             # Count Bombs, Trios, Pairs, Solos
             b, k, j, q = 0, 0, 0, 0
             for count in X:
@@ -245,18 +364,17 @@ class RARSMSBotTrainer(BaseTrainer):
                     j += 1
                 elif count == 1:
                     q += 1
-
+                    
             # Add minimal combination of remaining cards
             L = min(L, b + k + j + q)
-
+            
             memo[key] = L
             return L
-
-        
+            
         return G(X), len(hand)
 
-
-    def _calculate_advantage_function(self, temporal_difference_errors):
+    def _calculate_advantage(self, temporal_difference_errors):
+        """Calculate advantage function from TD errors."""
         T = len(temporal_difference_errors)
         advantage_function = []
         for t in range(T):
@@ -264,51 +382,52 @@ class RARSMSBotTrainer(BaseTrainer):
             for i in range(t, T):
                 advtg += (self.gamma * self.lmda) ** (i-t) * temporal_difference_errors[i]
             advantage_function.append(advtg)
-
-        return advantage_function         
-                
+            
+        return advantage_function
 
     def _calculate_actor_loss(self, bot, advantage_function, old_states, old_actions, old_probs):
         """ 
         PPO Clipped Objective Function.
         """
-        
+        # Handle empty data case
+        if not old_states:
+            return torch.tensor(0.0, requires_grad=True)
+            
         old_states = torch.tensor(old_states, dtype=torch.float32)
         old_actions = torch.tensor(old_actions, dtype=torch.long)
         old_probs = torch.tensor(old_probs, dtype=torch.float32)
         advantages = torch.tensor(advantage_function, dtype=torch.float32)
-
+        
         probs = []
-
+        
         for state, action in zip(old_states, old_actions):
             prob = bot.get_log_prob(state, action)
             probs.append(prob)
         probs = torch.tensor(probs, dtype=torch.float32)
-
+        
         ratios = torch.exp(probs - old_probs)
         clipped_ratios = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon)
-
+        
         actor_loss = -torch.mean(torch.min(ratios * advantages, clipped_ratios * advantages))
-
+        
         return actor_loss
-
 
     def _calculate_critic_loss(self, bot, states, rewards):
         """ 
         Objective function using MSE.
         """
-
+        # Handle empty data case
+        if not states:
+            return torch.tensor(0.0, requires_grad=True)
+        print(states)
         states = torch.tensor(states, dtype=torch.float32)
         rewards = torch.tensor(rewards, dtype=torch.float32)
-
+        
         predicted_rewards = []
         for state in states:
             predicted_rewards.append(bot.critic_network(state))
         predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
-
-
+        
         loss = torch.mean((predicted_rewards - rewards) ** 2)
-
+        
         return loss
-
-
