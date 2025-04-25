@@ -89,7 +89,8 @@ class RARSMSBotTrainer(BaseTrainer):
         
         # Store previous states, actions and probs for all players
         old_player_data = {
-            player_id: {'states': [], 'actions': [], 'probs': []}
+            player_id: {'states': [], 'perfect_states': [], 'actions': [], 'probs': [], 
+                        'rewards': [], 'td_errors': []}
             for player_id in range(3)
         }
 
@@ -102,6 +103,7 @@ class RARSMSBotTrainer(BaseTrainer):
             curr_player_data = {
                 player_id: {
                     'states': [],
+                    'perfect_states': [],
                     'actions': [],
                     'probs': [],
                     'rewards': [],
@@ -131,6 +133,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 
                 # Store current state, action, and probability
                 curr_player_data[player_id]['states'].append(state)
+                curr_player_data[player_id]['perfect_states'].append(perfect_state)
                 curr_player_data[player_id]['actions'].append(action)
                 curr_player_data[player_id]['probs'].append(prob)
                 
@@ -178,6 +181,7 @@ class RARSMSBotTrainer(BaseTrainer):
                 critic_loss = self._calculate_critic_loss(
                     current_bot,
                     curr_player_data[player_id]['states'],
+                    curr_player_data[player_id]['perfect_states'],
                     curr_player_data[player_id]['rewards']
                 )
                 
@@ -393,8 +397,6 @@ class RARSMSBotTrainer(BaseTrainer):
         if not old_states:
             return torch.tensor(0.0, requires_grad=True)
             
-        old_states = torch.tensor(old_states, dtype=torch.float32)
-        old_actions = torch.tensor(old_actions, dtype=torch.long)
         old_probs = torch.tensor(old_probs, dtype=torch.float32)
         advantages = torch.tensor(advantage_function, dtype=torch.float32)
         
@@ -412,20 +414,19 @@ class RARSMSBotTrainer(BaseTrainer):
         
         return actor_loss
 
-    def _calculate_critic_loss(self, bot, states, rewards):
+    def _calculate_critic_loss(self, bot, states, perfect_states, rewards):
         """ 
         Objective function using MSE.
         """
         # Handle empty data case
         if not states:
             return torch.tensor(0.0, requires_grad=True)
-        print(states)
-        states = torch.tensor(states, dtype=torch.float32)
+        
         rewards = torch.tensor(rewards, dtype=torch.float32)
         
         predicted_rewards = []
-        for state in states:
-            predicted_rewards.append(bot.critic_network(state))
+        for state, perfect_state in zip(states, perfect_states):
+            predicted_rewards.append(bot.predict_state(state, perfect_state))
         predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
         
         loss = torch.mean((predicted_rewards - rewards) ** 2)

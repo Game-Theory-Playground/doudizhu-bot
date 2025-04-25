@@ -149,9 +149,7 @@ class ResNetBackbone(nn.Module):
         
     def forward(self, x):
         x = self.initial_conv(x)
-        print(f"x shape: {x.shape}")
         x = self.layers(x)
-        print(f"x shape: {x.shape}")
         return x
         
     def _create_layers(self):
@@ -404,7 +402,6 @@ class RARSMSBot(BaseBot):
         
         selected_action = int(selected_action)
         
-        print("SELECTED ACTION", selected_action)
         
         return selected_action
         
