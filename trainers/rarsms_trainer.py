@@ -13,10 +13,10 @@ class RARSMSBotTrainer(BaseTrainer):
         douzerox_paths,  # Now accepts a list of three paths
         savedir,
         cuda,
-        save_interval,
-        num_actor_devices,
-        num_actors,
-        training_device,
+        save_interval=30,  # The number of episodes to save after
+        num_actor_devices = None,
+        num_actors = None,
+        training_device = None,
         learning_rate=0.001,
         batch_size=32,
         num_episodes=10000,
@@ -212,6 +212,7 @@ class RARSMSBotTrainer(BaseTrainer):
             
             # Save models periodically
             if episode % self.save_interval == 0:
+                print("SAVE INTERVAL", self.save_interval, episode % self.save_interval)
                 self._save_models(bots, episode)
 
     def _save_models(self, bots, episode):

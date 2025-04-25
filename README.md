@@ -53,7 +53,7 @@ This in not recommend since you'll need VERY outdated version of Node on your lo
 
 * To train a rarsms bot bot, run:
     ```bash
-    python3 train.py --landlord_path ./trained_models/douzerox/0_0.pth --peasant_up_path ./trained_models/douzerox/1_0.pth --peasant_down_path ./trained_models/douzerox/2_0.pth --algorithm rarsms --num_actor_devices 1 --num_actors 5 --save_interval 1 --cuda 0
+    python3 train.py --landlord_path ./trained_models/douzerox/0_0.pth --peasant_up_path ./trained_models/douzerox/1_0.pth --peasant_down_path ./trained_models/douzerox/2_0.pth --algorithm rarsms --num_actor_devices 1 --num_actors 5 --save_interval 30 --cuda 0
 
     ```
 
