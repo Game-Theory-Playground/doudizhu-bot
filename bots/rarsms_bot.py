@@ -347,6 +347,19 @@ class RARSMSBot(BaseBot):
         return expected_reward
     
 
+    def forward_critic(self, state, perfect_state):
+        """
+        Forward pass through the Critic network, keeping gradients for training.
+        """
+        imperfect_features = self._extract_imperfect_features(state)
+        history_features = self._extract_history_features(state)
+        perfect_features = self._extract_perfect_features(state, perfect_state)
+        
+        predicted_value = self.critic_network(imperfect_features, history_features, perfect_features)
+        
+        return predicted_value.squeeze()  # Remove extra dimensions if needed
+
+
     def _get_actor_masked_probs(self, state):
         """
         Returns the legal masked probabilities of the actor network

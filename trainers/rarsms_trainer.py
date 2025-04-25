@@ -32,6 +32,7 @@ class RARSMSBotTrainer(BaseTrainer):
         self.cuda = cuda
         self.training_device = training_device
         self.save_interval = save_interval
+        self.device = None
 
         # Hyperparameters
         self.gamma = 0.001
@@ -49,7 +50,7 @@ class RARSMSBotTrainer(BaseTrainer):
 
     def train(self):
         # Set CUDA device
-        device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() and self.cuda else "cpu")
+        self.device = torch.device(f"cuda:{self.training_device}" if torch.cuda.is_available() and self.cuda else "cpu")
         
         # Create bot instances for each role
         landlord_bot = RARSMSBot(self.landlord_path)
@@ -57,9 +58,9 @@ class RARSMSBotTrainer(BaseTrainer):
         peasant_down_bot = RARSMSBot(self.peasant_down_path) # Peasant before landlord
         
         # Set device for each bot
-        landlord_bot.set_device(device)
-        peasant_up_bot.set_device(device)
-        peasant_down_bot.set_device(device)
+        landlord_bot.set_device(self.device)
+        peasant_up_bot.set_device(self.device)
+        peasant_down_bot.set_device(self.device)
         
         # Create optimizers for each bot
         optimizers = {
@@ -422,12 +423,13 @@ class RARSMSBotTrainer(BaseTrainer):
         if not states:
             return torch.tensor(0.0, requires_grad=True)
         
-        rewards = torch.tensor(rewards, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
         
         predicted_rewards = []
         for state, perfect_state in zip(states, perfect_states):
-            predicted_rewards.append(bot.predict_state(state, perfect_state))
-        predicted_rewards = torch.tensor(predicted_rewards, dtype=torch.float32)
+            prediction = bot.forward_critic(state, perfect_state)
+            predicted_rewards.append(prediction)
+        predicted_rewards = torch.stack(predicted_rewards)
         
         loss = torch.mean((predicted_rewards - rewards) ** 2)
         
