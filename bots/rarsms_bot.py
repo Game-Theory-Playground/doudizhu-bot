@@ -359,20 +359,21 @@ class RARSMSBot(BaseBot):
         return predicted_value.squeeze()  # Remove extra dimensions if needed
 
 
-    def _get_actor_masked_probs(self, state):
+    def _get_actor_masked_probs(self, state, no_grad=False):
         """
         Returns the legal masked probabilities of the actor network
-        give the current state
+        give the current state. has_grad should be False while training
+        and True otherwise.
         """
 
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
 
-        with torch.no_grad():
-            action_probs = self.actor_network(
-                imperfect_features, 
-                history_features
-            )
+        if no_grad:
+            with torch.no_grad():
+                action_probs = self.actor_network(imperfect_features, history_features)
+        else:
+            action_probs = self.actor_network(imperfect_features, history_features)
 
         legal_actions = self._get_legal_actions_mask(state)
         masked_probs = action_probs * legal_actions
