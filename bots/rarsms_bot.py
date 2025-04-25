@@ -232,9 +232,11 @@ class CriticNetwork(nn.Module):
         self.fc1 = nn.Linear(512, 128)
         self.fc2 = nn.Linear(128, 1)  # Output state value V(s_t)
         
-    def forward(self, state_features):
+    def forward(self, imperfect, history, perfect):
         """Process state features and output state value"""
-        x = self.backbone(state_features)
+        x = torch.cat([imperfect, history, perfect], dim=0)
+        x = x.unsqueeze(0)
+        x = self.backbone(x)
         x = F.relu(self.fc1(x))
         x = self.fc2(x)
         return x  # V(s_t)
@@ -252,9 +254,8 @@ class RARSMSBot(BaseBot):
         self.use_raw = True
         
         # Set device - use CUDA if available by default
-        self.device = device if device is not None else (
-            'cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        self.device = torch.device(device if device is not None else ('cuda' if torch.cuda.is_available() else 'cpu'))
+
         
         # Initialize networks
         self.actor_network = ActorNetwork()
@@ -277,6 +278,9 @@ class RARSMSBot(BaseBot):
             weights_only=False
         )
         
+        if hasattr(dmc_agent, 'device'):
+            dmc_agent.device = self.device
+
         if hasattr(dmc_agent, 'to'):
             dmc_agent.to(self.device)
         if hasattr(dmc_agent, 'eval'):
@@ -296,14 +300,80 @@ class RARSMSBot(BaseBot):
         and DouZeroX filtering for optimal play.
         """
         # === Step 1: RARSMS forward pass ===
+        masked_probs =  self._get_actor_masked_probs(state)
+        rarsms_action_id = torch.argmax(masked_probs).item()
+
+        # === Step 2: Convert abstract action to real action ===
+        selected_action = self._convert_abstract_action_to_real(state, rarsms_action_id)
+
+        log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8)
+
+
+        return (selected_action, log_prog)
+
+
+    def get_log_prob(self, state, action):
+        """
+        Give a state and action, return the log probabilities
+        of the action being played.
+        """
+        # === Step 1: RARSMS forward pass ===
+        masked_probs =  self._get_actor_masked_probs(state)
+
+        # === Step 2: Convert real action to abstract action to get log prob ===
+        abstract_action = REAL_TO_ABS[action]
+        log_prog = torch.log(masked_probs[0, abstract_action] + 1e-8)
+
+        return log_prog
+    
+
+    def predict_state(self, state, perfect_state):
+        """
+        Use the Critic Network to predict the expected reward using the
+        current state
+        """
+
+        # Extract features
+        imperfect_features = self._extract_imperfect_features(state)
+        history_features = self._extract_history_features(state)
+        perfect_features = self._extract_perfect_features(state, perfect_state)
+        
+
+        # Forward pass through actor network (without perfect features during play)
+        with torch.no_grad():
+            expected_reward = self.critic_network(imperfect_features, history_features, perfect_features)
+
+        return expected_reward
+    
+
+    def forward_critic(self, state, perfect_state):
+        """
+        Forward pass through the Critic network, keeping gradients for training.
+        """
+        imperfect_features = self._extract_imperfect_features(state)
+        history_features = self._extract_history_features(state)
+        perfect_features = self._extract_perfect_features(state, perfect_state)
+        
+        predicted_value = self.critic_network(imperfect_features, history_features, perfect_features)
+        
+        return predicted_value.squeeze()  # Remove extra dimensions if needed
+
+
+    def _get_actor_masked_probs(self, state, no_grad=False):
+        """
+        Returns the legal masked probabilities of the actor network
+        give the current state. has_grad should be False while training
+        and True otherwise.
+        """
+
         imperfect_features = self._extract_imperfect_features(state)
         history_features = self._extract_history_features(state)
 
-        with torch.no_grad():
-            action_probs = self.actor_network(
-                imperfect_features, 
-                history_features
-            )
+        if no_grad:
+            with torch.no_grad():
+                action_probs = self.actor_network(imperfect_features, history_features)
+        else:
+            action_probs = self.actor_network(imperfect_features, history_features)
 
         legal_actions = self._get_legal_actions_mask(state)
         masked_probs = action_probs * legal_actions
@@ -313,34 +383,45 @@ class RARSMSBot(BaseBot):
         else:
             masked_probs = legal_actions / legal_actions.sum()
 
-        rarsms_action_id = torch.argmax(masked_probs).item()
+        return masked_probs
+    
+    
+    def _convert_abstract_action_to_real(self, state, abstract_action):
+        """
+        Use DouzeroX to convert abstract actions to real actions, given
+        the current state.
+        """
 
-        # === Step 2: Get DouZeroX candidate actions ===
-        action_idx, metadata = self.dmc_agent.step(state)
+        # === Step 1: Get DouZeroX candidate actions ===
+        action_idx, metadata = self.dmc_agent.eval_step(state)
         legal_action_strs = list(metadata['values'].keys())  # like ['33344', 'pass', ...]
 
-        # === Step 3: Map DouZeroX concrete actions to abstract IDs and filter ===
+        # === Step 2: Map DouZeroX concrete actions to abstract IDs and filter ===
         candidates = []
         for act_str in legal_action_strs:
             real_id = ACTION_2_ID.get(act_str)
             if real_id is None:
                 continue
-            if REAL_TO_ABS[real_id] == rarsms_action_id:
-                candidates.append((act_str, metadata['values'][act_str]))
+            if REAL_TO_ABS[real_id] == abstract_action:
+                candidates.append((real_id, metadata['values'][act_str]))
 
-        # === Step 4: Pick best candidate, or fallback ===
+        # === Step 3: Pick best candidate, or fallback ===
         if candidates:
             # Choose the one with highest DMC probability
             selected_action = max(candidates, key=lambda x: x[1])[0]
         else:
             # No match: fallback to most probable action produced by DouZeroX
             selected_action = action_idx
-
-        return (selected_action, metadata)
+        
+        selected_action = int(selected_action)
+        
+        
+        return selected_action
+        
 
     def _extract_imperfect_features(self, state):
         """
-        Extract imperfect information features (49x54).
+        Extract imperfect information features features (19x54).
         
         This includes information that is visible to the agent during gameplay
         without knowing other players' hands.
@@ -354,7 +435,7 @@ class RARSMSBot(BaseBot):
         current_hand = raw['current_hand']
 
         # Initialize feature tensor
-        feat = torch.zeros(49, 54, device=self.device)
+        feat = torch.zeros(19, 54, device=self.device)
         
         # 0. Count bombs from trace
         bombs_played = self._count_bombs_in_trace(trace)
@@ -385,9 +466,6 @@ class RARSMSBot(BaseBot):
 
         # Most recent action and cards played
         feat[17:19] = self._encode_last_action(trace, num_cards_left)
-
-        # Last 15 actions history (30 rows)
-        feat[19:49] = self._extract_history_features(state)
         
         return feat
 
@@ -483,9 +561,9 @@ class RARSMSBot(BaseBot):
 
     def _extract_perfect_features(self, state, perfect_state):
         """
-        Extract a 57x54 perfect feature tensor.
+        Extract a 8x54 perfect feature tensor.
         
-        This includes both imperfect features and perfect information about
+        This is the perfect information about
         other players' hands, which is only available during training.
         """
         num_cards_left = state['raw_obs']['num_cards_left']
@@ -493,10 +571,7 @@ class RARSMSBot(BaseBot):
         prev_pid = (current_pid - 1) % 3
         next_pid = (current_pid + 1) % 3
 
-        # 1. Get the 49x54 imperfect features
-        imperfect_feat = self._extract_imperfect_features(state)
-
-        # 2. Prepare an 8x54 block for perfect features
+        # Prepare an 8x54 block for perfect features
         perfect_feat = torch.zeros(8, 54, device=self.device)
         
         # Previous player's identity and cards
@@ -507,9 +582,7 @@ class RARSMSBot(BaseBot):
         perfect_feat[4] = self._encode_player_identity(next_pid, num_cards_left[next_pid])
         perfect_feat[5:8] = self._encode_cards_in_hand(list(perfect_state['hand_cards'][next_pid]))
 
-        # Concatenate imperfect and perfect features: (49+8)x54 = 57x54
-        final_feats = torch.cat([imperfect_feat, perfect_feat], dim=0)
-        return final_feats
+        return perfect_feat
 
     def _get_legal_actions_mask(self, state):
         """Create a binary mask for legal actions."""

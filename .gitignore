@@ -2,3 +2,5 @@ venv/
 env
 results/
 *.pyc
+
+temp/
