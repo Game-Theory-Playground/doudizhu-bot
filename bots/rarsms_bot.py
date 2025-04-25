@@ -320,10 +320,9 @@ class RARSMSBot(BaseBot):
         # === Step 1: RARSMS forward pass ===
         masked_probs =  self._get_actor_masked_probs(state)
 
-        # === Step 2: Convert abstract action to real action ===
-        selected_action = self._convert_abstract_action_to_real(state, action)
-
-        log_prog = torch.log(masked_probs[0, selected_action] + 1e-8).item()
+        # === Step 2: Convert real action to abstract action to get log prob ===
+        abstract_action = REAL_TO_ABS[action]
+        log_prog = torch.log(masked_probs[0, abstract_action] + 1e-8)
 
         return log_prog
     
