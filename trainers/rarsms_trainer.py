@@ -218,7 +218,7 @@ class RARSMSBotTrainer(BaseTrainer):
     def _save_models(self, bots, episode):
         """Save all three models."""
         for player_id, _ in enumerate(["landlord", "peasant_up", "peasant_down"]):
-            self._save_model(player_id, bots[player_id].actor_network, episode)
+            self._save_model("rarsms", player_id, bots[player_id].actor_network, episode)
 
     def _calculate_intrinsic_reward(self, environment_reward: float, player_id: int):
         """

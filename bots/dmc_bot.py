@@ -16,8 +16,8 @@ class DMCBot(BaseBot):
 
     def _load_model(self):
         from rlcard.agents.dmc_agent.model import DMCAgent
-        from torch.serialization import add_safe_globals
-        add_safe_globals([DMCAgent])
+        # from torch.serialization import add_safe_globals
+        # add_safe_globals([DMCAgent])
 
         obj = torch.load(self.model_path, map_location=self.device, weights_only=False)
         print(f"[DMCBot] Loaded model from {self.model_path} ({type(obj)})")
@@ -29,19 +29,10 @@ class DMCBot(BaseBot):
             self.agent.eval()
 
     def act(self, state):
-        action = self.agent.step(state)
-        return action
+        return self.agent.step(state)
 
     def eval_step(self, state):
-        output = self.agent.eval_step(state)
-    
-        if isinstance(output, tuple):
-            action, info = output
-        else:
-            action = output
-            info = {}
-
-        return int(action), info
+        return self.agent.eval_step(state)
 
     def set_device(self, device):
         self.device = device

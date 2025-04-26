@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from collections import Counter
-from rlcard.games.doudizhu.utils import ACTION_2_ID
+from rlcard.games.doudizhu.utils import ACTION_2_ID, ID_2_ACTION
 
 # Card ordering for Dou Dizhu (Fighting the Landlord)
 CARD_ORDER = ['3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A', '2', 'BJ', 'RJ']
@@ -247,7 +247,7 @@ class RARSMSBot(BaseBot):
     Reinforcement Learning bot for Dou Dizhu using Actor-Critic architecture.
     """
     
-    def __init__(self, douzerox_path, position=None, device=None):
+    def __init__(self, douzerox_path, actor_path=None, critic_path=None, position=None, device=None):
         super().__init__(position)
 
         # Record features from raw information from RLCard environment
@@ -260,17 +260,40 @@ class RARSMSBot(BaseBot):
         # Initialize networks
         self.actor_network = ActorNetwork()
         self.critic_network = CriticNetwork()
+        
+        if actor_path:
+            self.load_actor_parameters(actor_path)
+        if critic_path:
+            self.load_critic_parameters(critic_path)
         self.dmc_agent = self._load_dmc_agent(douzerox_path)
         
         # Move networks to the selected device
         self.actor_network.to(self.device)
         self.critic_network.to(self.device)
+        
+    def load_actor_parameters(self, path):
+        """Load pre-trained parameters for the actor network."""
+        state_dict = torch.load(path, map_location=self.device, weights_only=False)
+        # Handle DataParallel saved models if needed
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        self.actor_network.load_state_dict(state_dict)
+        print(f"Actor parameters loaded from {path}")
+    
+    def load_critic_parameters(self, path):
+        """Load pre-trained parameters for the critic network."""
+        state_dict = torch.load(path, map_location=self.device, weights_only=False)
+        # Handle DataParallel saved models if needed
+        if any(k.startswith('module.') for k in state_dict.keys()):
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        self.critic_network.load_state_dict(state_dict)
+        print(f"Critic parameters loaded from {path}")
     
     def _load_dmc_agent(self, model_path):
         """Load DMC agent from model path"""
         from rlcard.agents.dmc_agent.model import DMCAgent
-        from torch.serialization import add_safe_globals
-        add_safe_globals([DMCAgent])
+        # from torch.serialization import add_safe_globals
+        # add_safe_globals([DMCAgent])
          
         dmc_agent = torch.load(
             model_path, 
@@ -304,12 +327,30 @@ class RARSMSBot(BaseBot):
         rarsms_action_id = torch.argmax(masked_probs).item()
 
         # === Step 2: Convert abstract action to real action ===
-        selected_action = self._convert_abstract_action_to_real(state, rarsms_action_id)
+        selected_action, _ = self._convert_abstract_action_to_real(state, rarsms_action_id)
 
-        log_prog = torch.log(masked_probs[0, rarsms_action_id] + 1e-8)
+        # Calculate log probability for the selected action
+        log_prob = torch.log(masked_probs[0, rarsms_action_id] + 1e-8)
 
+        # If we're in training mode, return action and log probability
+        # Otherwise, just return the action for the environment
+        return (selected_action, log_prob)
+        
+    def eval_step(self, state):
+        """
+        Method called by RLCard environment during evaluation.
+        Returns a proper action and metadata that the environment expects.
+        """
+        # === Step 1: RARSMS forward pass ===
+        masked_probs = self._get_actor_masked_probs(state)
+        rarsms_action_id = torch.argmax(masked_probs).item()
 
-        return (selected_action, log_prog)
+        # === Step 2: Convert abstract action to real action ===
+        action_id, prob = self._convert_abstract_action_to_real(state, rarsms_action_id)
+    
+        # For debugging
+        # The environment expects (action, info_dict) format
+        return ID_2_ACTION[action_id], prob
 
 
     def get_log_prob(self, state, action):
@@ -415,8 +456,7 @@ class RARSMSBot(BaseBot):
         
         selected_action = int(selected_action)
         
-        
-        return selected_action
+        return selected_action, metadata
         
 
     def _extract_imperfect_features(self, state):

@@ -33,11 +33,12 @@ def evaluate(args):
             agent = RandomAgent(num_actions=env.num_actions)
             bot_labels.append('random')
         elif bot_type == 'rarsms':
-            if len(parts) < 2:
-                raise ValueError("rarsms bot needs a model path")
-            model_file = parts[1]
-            agent = RARSMSBot(model_file, position)
-            bot_labels.append(f'rarsms({os.path.basename(model_file)})')
+            if len(parts) < 3:
+                raise ValueError("rarsms bot needs both douzerox_path and actor_path. Format: rarsms:douzerox_path:actor_path")
+            douzerox_path = parts[1]
+            actor_path = parts[2]
+            agent = RARSMSBot(douzerox_path=douzerox_path, actor_path=actor_path, position=position)
+            bot_labels.append(f'rarsms({os.path.basename(actor_path)})')
         else:
             raise ValueError(f"Unknown bot type: {bot_type}")
 
@@ -58,10 +59,13 @@ def evaluate(args):
 
 if __name__ == '__main__':
     parser.add_argument('--bots', nargs='*', default=[
-        'dmc:results/dmc/1742603200/0_220153600.pth',
-        'random',
-        'random'
-    ])
+        'rarsms:trained_models/douzerox/0_0.pth:results/0_9990.pth',
+        'dmc:trained_models/douzerox/1_0.pth',
+        'dmc:trained_models/douzerox/2_0.pth'
+    ], help='Bot specifications. Format depends on bot type:\n'
+             'random\n'
+             'dmc:model_path\n'
+             'rarsms:douzerox_path:actor_path')
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--num_games', type=int, default=1000)
 
